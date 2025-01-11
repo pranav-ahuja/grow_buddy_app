@@ -24,3 +24,9 @@ const TextStyle kH2TextStyle = TextStyle(
   color: kTextColor,
   fontWeight: FontWeight.w400,
 );
+
+//Elevated button Constants
+const double kElevatedButtonVerticalPadding = 10.0;
+const double kElevatedButtonTextSize = 18.0;
+const double kElevatedButtonIconSize = 30.0;
+const double kEvelatedButtonPadding = 8.0;

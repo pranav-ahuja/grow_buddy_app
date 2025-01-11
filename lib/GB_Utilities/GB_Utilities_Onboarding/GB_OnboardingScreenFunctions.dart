@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_Login.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Buttons.dart';
 import 'package:colorful_iconify_flutter/icons/logos.dart';
 import 'package:iconify_flutter/icons/material_symbols.dart';
@@ -39,10 +40,17 @@ void loginSignUpPopUpCard(BuildContext context) {
                 buttonColor: kPrimaryColor1,
                 elevatedButtonText: "Login",
                 elevatedButtonTextColor: kPrimaryColor2,
-                verticalPadding: 10.0,
+                verticalPadding: kElevatedButtonVerticalPadding,
                 elevatedButtonFontWeight: FontWeight.w500,
-                elevatedButtonTextSize: 18.0,
-                onPressed: () {},
+                elevatedButtonTextSize: kElevatedButtonTextSize,
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => GB_Login(),
+                    ),
+                  );
+                },
               ),
               GB_ElevatedButtonString(
                 screenWidth: screenWidth,
@@ -50,9 +58,9 @@ void loginSignUpPopUpCard(BuildContext context) {
                 buttonColor: kPrimaryColor2,
                 elevatedButtonFontWeight: FontWeight.w500,
                 elevatedButtonTextColor: kPrimaryColor1,
-                elevatedButtonTextSize: 18.0,
+                elevatedButtonTextSize: kElevatedButtonTextSize,
                 horizontalPadding: 0.25,
-                verticalPadding: 10.0,
+                verticalPadding: kElevatedButtonVerticalPadding,
                 onPressed: () {},
               ),
               Row(
@@ -60,14 +68,14 @@ void loginSignUpPopUpCard(BuildContext context) {
                 children: [
                   GB_ElevatedButtonIcons(
                     elevatedButtonIcon: Logos.google_icon,
-                    elevatedButtonIconSize: 30.0,
-                    elevatedButtonPadding: 8.0,
+                    elevatedButtonIconSize: kElevatedButtonIconSize,
+                    elevatedButtonPadding: kEvelatedButtonPadding,
                     onPressed: () {},
                   ),
                   GB_ElevatedButtonIcons(
                     elevatedButtonIcon: MaterialSymbols.call,
-                    elevatedButtonIconSize: 30.0,
-                    elevatedButtonPadding: 8.0,
+                    elevatedButtonIconSize: kElevatedButtonIconSize,
+                    elevatedButtonPadding: kEvelatedButtonPadding,
                     onPressed: () {},
                   ),
                 ],
