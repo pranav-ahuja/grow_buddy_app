@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_Login.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_SignUp.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Buttons.dart';
 import 'package:colorful_iconify_flutter/icons/logos.dart';
 import 'package:iconify_flutter/icons/material_symbols.dart';
@@ -61,7 +62,14 @@ void loginSignUpPopUpCard(BuildContext context) {
                 elevatedButtonTextSize: kElevatedButtonTextSize,
                 horizontalPadding: 0.25,
                 verticalPadding: kElevatedButtonVerticalPadding,
-                onPressed: () {},
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => GB_SignUp(),
+                    ),
+                  );
+                },
               ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,

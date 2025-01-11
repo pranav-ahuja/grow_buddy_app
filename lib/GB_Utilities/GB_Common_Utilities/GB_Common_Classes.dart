@@ -40,3 +40,24 @@ class GB_H1HeadingText extends StatelessWidget {
     );
   }
 }
+
+class GB_AppBarText extends StatelessWidget {
+  const GB_AppBarText({
+    super.key,
+    required this.appBarFontWeight,
+    required this.appBarText,
+  });
+
+  final String appBarText;
+  final FontWeight appBarFontWeight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      appBarText,
+      style: TextStyle(
+        fontWeight: appBarFontWeight,
+      ),
+    );
+  }
+}

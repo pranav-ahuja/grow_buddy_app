@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_SignUp.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Classes.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Buttons.dart';
@@ -30,11 +31,9 @@ class _GB_LoginState extends State<GB_Login> {
     double screenWidth = MediaQuery.of(context).size.width;
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          "Login",
-          style: TextStyle(
-            fontWeight: FontWeight.w500,
-          ),
+        title: GB_AppBarText(
+          appBarText: "Login",
+          appBarFontWeight: FontWeight.w500,
         ),
       ),
       body: Padding(
@@ -166,7 +165,14 @@ class _GB_LoginState extends State<GB_Login> {
                       textButtonText: "Forgot Password?",
                     ),
                     GB_TextButton(
-                      onPressed: () {},
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => GB_SignUp(),
+                          ),
+                        );
+                      },
                       textButtonColor: Colors.black54,
                       textButtonText: "New to Grow Buddy? Sign up now",
                     ),
