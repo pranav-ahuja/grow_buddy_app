@@ -7,7 +7,7 @@ import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Butt
 import 'package:colorful_iconify_flutter/icons/logos.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_TextButton.dart';
 import 'package:iconify_flutter/icons/material_symbols.dart';
-import 'package:dropdown_button2/dropdown_button2.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_MobileLogin.dart';
 
 class GB_SignUp extends StatefulWidget {
   const GB_SignUp({super.key});
@@ -208,7 +208,15 @@ class _GB_SignUpState extends State<GB_SignUp> {
                                         kElevatedButtonIconSize,
                                     elevatedButtonPadding:
                                         kEvelatedButtonPadding,
-                                    onPressed: () {},
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              GB_MobileLogin(),
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ],
                               ),
