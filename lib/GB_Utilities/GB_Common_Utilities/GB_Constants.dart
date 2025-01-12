@@ -30,3 +30,7 @@ const double kElevatedButtonVerticalPadding = 10.0;
 const double kElevatedButtonTextSize = 18.0;
 const double kElevatedButtonIconSize = 30.0;
 const double kEvelatedButtonPadding = 8.0;
+
+//Account Type
+const int accountTypeTeacher = 0;
+const int accountTypeStudent = 1;

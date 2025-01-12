@@ -6,10 +6,12 @@ class GB_TextButton extends StatelessWidget {
     required this.textButtonText,
     required this.textButtonColor,
     required this.onPressed,
+    this.textButtonTextSize = 15.0,
   });
 
   final String textButtonText;
   final Color textButtonColor;
+  final double textButtonTextSize;
   final onPressed;
 
   @override
@@ -20,6 +22,7 @@ class GB_TextButton extends StatelessWidget {
         textButtonText,
         style: TextStyle(
           color: textButtonColor,
+          fontSize: textButtonTextSize,
         ),
       ),
     );

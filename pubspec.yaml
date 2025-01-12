@@ -38,6 +38,7 @@ dependencies:
   another_flutter_splash_screen: ^1.2.1
   carousel_slider: ^5.0.0
   iconify_flutter: ^0.0.7
+  dropdown_button2: ^2.3.9
 
 dev_dependencies:
   flutter_test:

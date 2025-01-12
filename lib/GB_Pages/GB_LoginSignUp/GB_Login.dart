@@ -4,6 +4,7 @@ import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Classe
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Buttons.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_TextButton.dart';
+import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Functions.dart';
 
 class GB_Login extends StatefulWidget {
   const GB_Login({super.key});
@@ -20,7 +21,7 @@ class _GB_LoginState extends State<GB_Login> {
   String password = "";
   bool emailCloseButtonPressed = false;
   bool passwordCloseButtonPressed = false;
-  IconData? passwordVisibilityIcon = Icons.visibility;
+  IconData passwordVisibilityIcon = Icons.visibility;
 
   bool isCheckBoxChecked = false;
   Color checkBoxColor = kPrimaryColor2;
@@ -55,63 +56,41 @@ class _GB_LoginState extends State<GB_Login> {
                 margin: EdgeInsets.symmetric(vertical: 20.0),
                 child: Column(
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10.0),
-                      child: TextField(
-                        controller: _email_controller,
-                        decoration: InputDecoration(
-                          suffixIcon: InkWell(
-                            child: Icon(
-                              Icons.cancel_outlined,
-                            ),
-                            onTap: () {
-                              setState(() {
-                                _email_controller.clear();
-                              });
-                            },
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(50.0),
-                          ),
-                          hintText: "abc@example.com",
-                          label: Text("Email"),
-                        ),
-                        keyboardType: TextInputType.emailAddress,
-                        onChanged: (value) {
-                          emailAddress = value;
-                          if (emailAddress.isNotEmpty) {}
-                        },
-                      ),
+                    GB_buildTextField(
+                      controller: _email_controller,
+                      suffixIcon: Icons.cancel_outlined,
+                      iconAction: () {
+                        setState(() {
+                          _email_controller.clear();
+                        });
+                      },
+                      textFieldHintText: "abc@example.com",
+                      textFieldLabel: "Email",
+                      textFieldKeyboardType: TextInputType.emailAddress,
+                      textFieldOnChanged: (value) {
+                        emailAddress = value;
+                      },
                     ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10.0),
-                      child: TextField(
-                        controller: _password_controller,
-                        decoration: InputDecoration(
-                          suffixIcon: InkWell(
-                            onTap: () {
-                              setState(() {
-                                passwordCloseButtonPressed =
-                                    !passwordCloseButtonPressed;
-                                if (passwordCloseButtonPressed) {
-                                  passwordVisibilityIcon = Icons.visibility_off;
-                                } else {
-                                  passwordVisibilityIcon = Icons.visibility;
-                                }
-                              });
-                            },
-                            child: Icon(
-                              passwordVisibilityIcon,
-                            ),
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(50.0),
-                          ),
-                          label: Text("Password"),
-                        ),
-                        keyboardType: TextInputType.visiblePassword,
-                        obscureText: !passwordCloseButtonPressed,
-                      ),
+                    GB_buildTextField(
+                      controller: _password_controller,
+                      suffixIcon: passwordVisibilityIcon,
+                      iconAction: () {
+                        setState(() {
+                          passwordCloseButtonPressed =
+                              !passwordCloseButtonPressed;
+                          if (passwordCloseButtonPressed) {
+                            passwordVisibilityIcon = Icons.visibility_off;
+                          } else {
+                            passwordVisibilityIcon = Icons.visibility;
+                          }
+                        });
+                      },
+                      textFieldLabel: "Password",
+                      textFieldOnChanged: (value) {
+                        password = value;
+                      },
+                      textFieldKeyboardType: TextInputType.visiblePassword,
+                      textFieldObscureText: passwordCloseButtonPressed,
                     ),
                     Row(
                       children: [
@@ -131,12 +110,21 @@ class _GB_LoginState extends State<GB_Login> {
                             });
                           },
                         ),
-                        Text(
-                          "Remember Me",
-                          style: TextStyle(
-                            color: rememberMeColor,
-                            fontSize: 18.0,
-                          ),
+                        GB_TextButton(
+                          textButtonText: "Remember me",
+                          textButtonColor: rememberMeColor,
+                          textButtonTextSize: 18.0,
+                          onPressed: () {
+                            setState(() {
+                              isCheckBoxChecked = !isCheckBoxChecked;
+                              rememberMeColor = isCheckBoxChecked
+                                  ? kPrimaryColor1
+                                  : Colors.black45;
+                              checkBoxColor = isCheckBoxChecked
+                                  ? kPrimaryColor1
+                                  : kPrimaryColor2;
+                            });
+                          },
                         ),
                       ],
                     ),
