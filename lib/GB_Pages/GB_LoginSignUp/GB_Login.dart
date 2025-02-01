@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_SignUp.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Classes.dart';
+import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Globals.dart';
+import 'package:http/http.dart' as http;
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Buttons.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_TextButton.dart';
@@ -17,15 +20,42 @@ class _GB_LoginState extends State<GB_Login> {
   final TextEditingController _email_controller = TextEditingController();
   final TextEditingController _password_controller = TextEditingController();
 
-  String emailAddress = "";
-  String password = "";
+  Map<String, String> credentials = {
+    "emailID": "",
+    "password": "",
+    "token": "",
+  };
+
+  DateTime latestTimeStamp = DateTime.now();
+
   bool emailCloseButtonPressed = false;
   bool passwordCloseButtonPressed = false;
-  IconData passwordVisibilityIcon = Icons.visibility;
+  IconData passwordVisibilityIcon = Icons.visibility_off;
 
   bool isCheckBoxChecked = false;
   Color checkBoxColor = kPrimaryColor2;
   Color rememberMeColor = Colors.grey;
+
+  void authenticate_login(Map<String, String> credentials) async {
+    final response = await http.post(
+      Uri.parse(
+        kLoginUrl,
+      ),
+      headers: {
+        "Content-Type": "application/json", // 👈 Ensures JSON format
+        "Accept": "application/json",
+      },
+      body: jsonEncode({
+        "email": credentials["emailID"],
+        "password": credentials["password"]
+      }),
+    );
+    print("Response - ${response.statusCode}");
+    if (response.statusCode == 200) {
+      credentials["token"] = response.body;
+    }
+    gLoginToken = credentials["token"];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +100,7 @@ class _GB_LoginState extends State<GB_Login> {
                       textFieldLabel: "Email",
                       textFieldKeyboardType: TextInputType.emailAddress,
                       textFieldOnChanged: (value) {
-                        emailAddress = value;
+                        credentials["emailID"] = value;
                       },
                     ),
                     GB_buildTextField(
@@ -81,18 +111,18 @@ class _GB_LoginState extends State<GB_Login> {
                           passwordCloseButtonPressed =
                               !passwordCloseButtonPressed;
                           if (passwordCloseButtonPressed) {
-                            passwordVisibilityIcon = Icons.visibility_off;
-                          } else {
                             passwordVisibilityIcon = Icons.visibility;
+                          } else {
+                            passwordVisibilityIcon = Icons.visibility_off;
                           }
                         });
                       },
                       textFieldLabel: "Password",
                       textFieldOnChanged: (value) {
-                        password = value;
+                        credentials["password"] = value;
                       },
                       textFieldKeyboardType: TextInputType.visiblePassword,
-                      textFieldObscureText: passwordCloseButtonPressed,
+                      textFieldObscureText: !passwordCloseButtonPressed,
                     ),
                     Row(
                       children: [
@@ -142,7 +172,11 @@ class _GB_LoginState extends State<GB_Login> {
                 elevatedButtonTextColor: kPrimaryColor2,
                 elevatedButtonFontWeight: FontWeight.w500,
                 elevatedButtonTextSize: kElevatedButtonTextSize,
-                onPressed: () {},
+                onPressed: () {
+                  setState(() {
+                    authenticate_login(credentials);
+                  });
+                },
               ),
               Container(
                 height: 100.0,

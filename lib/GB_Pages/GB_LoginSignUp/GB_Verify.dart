@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Classes.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Buttons.dart';
-import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_TextButton.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_SignUp.dart';
 import 'package:pinput/pinput.dart';

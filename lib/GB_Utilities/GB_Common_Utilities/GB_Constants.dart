@@ -34,3 +34,6 @@ const double kEvelatedButtonPadding = 8.0;
 //Account Type
 const int accountTypeTeacher = 0;
 const int accountTypeStudent = 1;
+
+//Http requests
+const String kLoginUrl = 'http://192.168.0.157:8080/api/v1/authenticate';
