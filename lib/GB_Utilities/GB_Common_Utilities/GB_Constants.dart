@@ -15,12 +15,12 @@ const double kCarouselImageSliderViewPort = 1.0;
 
 //Heading and Text Constants
 const TextStyle kH1TextStyle = TextStyle(
-  fontSize: 25,
+  fontSize: 20,
   color: kTextColor,
   fontWeight: FontWeight.w500,
 );
 const TextStyle kH2TextStyle = TextStyle(
-  fontSize: 20.0,
+  fontSize: 15.0,
   color: kTextColor,
   fontWeight: FontWeight.w400,
 );

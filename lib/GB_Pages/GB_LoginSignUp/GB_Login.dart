@@ -42,15 +42,17 @@ class _GB_LoginState extends State<GB_Login> {
         child: SingleChildScrollView(
           child: Column(
             children: [
-              Image.asset("assets/images/login_page.png"),
+              Image.asset(
+                "assets/images/login_page.png",
+              ),
               GB_H1HeadingText(
                 inputText: "Welcome back to Grow Buddy",
-                inputTextAlign: TextAlign.center,
+                inputTextAlign: TextAlign.left,
               ),
               GB_H2HeadingText(
                 inputText:
                     "Manage your classroom, all in one place. Enter your email and password to continue.",
-                inputTextAlign: TextAlign.center,
+                inputTextAlign: TextAlign.left,
               ),
               Container(
                 margin: EdgeInsets.symmetric(vertical: 20.0),
@@ -133,7 +135,7 @@ class _GB_LoginState extends State<GB_Login> {
               ),
               GB_ElevatedButtonString(
                 screenWidth: screenWidth,
-                horizontalPadding: 0.35,
+                horizontalPadding: 0.2,
                 verticalPadding: kElevatedButtonVerticalPadding,
                 elevatedButtonText: "Login",
                 buttonColor: kPrimaryColor1,
@@ -143,7 +145,7 @@ class _GB_LoginState extends State<GB_Login> {
                 onPressed: () {},
               ),
               Container(
-                height: 200.0,
+                height: 100.0,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [

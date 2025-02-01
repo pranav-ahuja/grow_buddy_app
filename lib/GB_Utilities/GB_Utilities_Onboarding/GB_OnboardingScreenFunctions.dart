@@ -31,14 +31,14 @@ void loginSignUpPopUpCard(BuildContext context) {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              GB_H2HeadingText(
+              GB_H1HeadingText(
                 inputText:
-                    "\"Create your account or log in to continue.\nYour data is safe with us\"",
+                    "\"Create your account or log in to continue.Your data is safe with us\"",
                 inputTextAlign: TextAlign.center,
               ),
               GB_ElevatedButtonString(
                 screenWidth: screenWidth,
-                horizontalPadding: 0.27,
+                horizontalPadding: 0.2,
                 buttonColor: kPrimaryColor1,
                 elevatedButtonText: "Login",
                 elevatedButtonTextColor: kPrimaryColor2,
@@ -61,7 +61,7 @@ void loginSignUpPopUpCard(BuildContext context) {
                 elevatedButtonFontWeight: FontWeight.w500,
                 elevatedButtonTextColor: kPrimaryColor1,
                 elevatedButtonTextSize: kElevatedButtonTextSize,
-                horizontalPadding: 0.25,
+                horizontalPadding: 0.18,
                 verticalPadding: kElevatedButtonVerticalPadding,
                 onPressed: () {
                   Navigator.push(

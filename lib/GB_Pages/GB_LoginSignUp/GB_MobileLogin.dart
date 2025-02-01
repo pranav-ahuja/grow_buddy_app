@@ -67,7 +67,6 @@ class _GB_MobileLoginState extends State<GB_MobileLogin> {
                       onChanged: (value) {
                         setState(() {
                           phoneNumber = value.toString();
-
                           if (phoneNumber.isNotEmpty) {
                             nextButtonColor = kPrimaryColor1;
                             nextButtonTextColor = kPrimaryColor2;
@@ -86,7 +85,7 @@ class _GB_MobileLoginState extends State<GB_MobileLogin> {
               Center(
                 child: GB_ElevatedButtonString(
                   screenWidth: screenWidth,
-                  horizontalPadding: 0.35,
+                  horizontalPadding: 0.2,
                   verticalPadding: 10.0,
                   elevatedButtonText: "Next",
                   buttonColor: nextButtonColor,

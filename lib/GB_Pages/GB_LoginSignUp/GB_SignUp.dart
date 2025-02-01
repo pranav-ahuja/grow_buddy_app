@@ -172,7 +172,7 @@ class _GB_SignUpState extends State<GB_SignUp> {
                         padding: const EdgeInsets.symmetric(vertical: 10.0),
                         child: GB_ElevatedButtonString(
                           screenWidth: screenWidth,
-                          horizontalPadding: 0.3,
+                          horizontalPadding: 0.2,
                           verticalPadding: 10.0,
                           elevatedButtonText: "Sign up",
                           buttonColor: kPrimaryColor1,
