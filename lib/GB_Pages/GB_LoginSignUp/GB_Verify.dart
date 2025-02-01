@@ -60,7 +60,7 @@ class _GB_VerifyState extends State<GB_Verify> {
                 child: Center(
                   child: GB_ElevatedButtonString(
                     screenWidth: screenWidth,
-                    horizontalPadding: 0.30,
+                    horizontalPadding: 0.25,
                     verticalPadding: 10.0,
                     elevatedButtonText: "Confirm",
                     buttonColor: kPrimaryColor1,
@@ -76,7 +76,7 @@ class _GB_VerifyState extends State<GB_Verify> {
                 child: Center(
                   child: GB_ElevatedButtonString(
                     screenWidth: screenWidth,
-                    horizontalPadding: 0.25,
+                    horizontalPadding: 0.2,
                     verticalPadding: 10.0,
                     elevatedButtonText: "Resend Code",
                     buttonColor: kPrimaryColor2,
