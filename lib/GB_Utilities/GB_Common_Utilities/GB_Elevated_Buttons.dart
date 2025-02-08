@@ -30,7 +30,7 @@ class GB_ElevatedButtonString extends StatelessWidget {
     return ElevatedButton(
       onPressed: onPressed,
       style: ButtonStyle(
-        backgroundColor: MaterialStateProperty.all(buttonColor),
+        backgroundColor: WidgetStateProperty.all(buttonColor),
       ),
       child: Padding(
         padding: EdgeInsets.symmetric(
@@ -69,7 +69,7 @@ class GB_ElevatedButtonIcons extends StatelessWidget {
     return ElevatedButton(
       onPressed: onPressed,
       style: ButtonStyle(
-        shape: MaterialStateProperty.all(
+        shape: WidgetStateProperty.all(
           CircleBorder(),
         ),
       ),

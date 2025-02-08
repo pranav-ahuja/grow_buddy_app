@@ -54,6 +54,8 @@ class _GB_LoginState extends State<GB_Login> {
     if (response.statusCode == 200) {
       credentials["token"] = response.body;
     }
+    //TODO: What will backend send in case of wrong login
+    print("Error ${response.statusCode}");
     gLoginToken = credentials["token"];
   }
 
@@ -128,7 +130,7 @@ class _GB_LoginState extends State<GB_Login> {
                       children: [
                         Checkbox(
                           value: isCheckBoxChecked,
-                          fillColor: MaterialStateProperty.all(checkBoxColor),
+                          fillColor: WidgetStateProperty.all(checkBoxColor),
                           onChanged: (bool? newVal) {
                             setState(() {
                               isCheckBoxChecked = !isCheckBoxChecked;
