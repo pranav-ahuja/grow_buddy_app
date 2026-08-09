@@ -36,27 +36,59 @@ class _GB_LoginState extends State<GB_Login> {
   Color checkBoxColor = kPrimaryColor2;
   Color rememberMeColor = Colors.grey;
 
-  void authenticate_login(Map<String, String> credentials) async {
-    final response = await http.post(
-      Uri.parse(
-        kLoginUrl,
-      ),
-      headers: {
-        "Content-Type": "application/json", // 👈 Ensures JSON format
-        "Accept": "application/json",
-      },
-      body: jsonEncode({
-        "email": credentials["emailID"],
-        "password": credentials["password"]
-      }),
-    );
-    print("Response - ${response.statusCode}");
-    if (response.statusCode == 200) {
-      credentials["token"] = response.body;
+  Future<bool> authenticate_login(Map<String, String> credentials) async {
+    if ((credentials["emailID"] ?? "").isEmpty ||
+        (credentials["password"] ?? "").isEmpty) {
+      _showSnack("Please enter email and password");
+      return false;
     }
-    //TODO: What will backend send in case of wrong login
-    print("Error ${response.statusCode}");
-    gLoginToken = credentials["token"];
+
+    try {
+      final response = await http.post(
+        Uri.parse(kLoginUrl),
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: jsonEncode({
+          "email": credentials["emailID"],
+          "password": credentials["password"],
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        // TODO: confirm backend response shape.
+        // If it returns {"token": "..."}, use jsonDecode(response.body)["token"].
+        // If it returns the raw token string, response.body is the token.
+        String token;
+        try {
+          final decoded = jsonDecode(response.body);
+          token = decoded is Map<String, dynamic> && decoded["token"] != null
+              ? decoded["token"].toString()
+              : response.body;
+        } catch (_) {
+          token = response.body;
+        }
+        gLoginToken = token;
+        credentials["token"] = token;
+        // TODO: Navigate to home/dashboard page here once it exists.
+        _showSnack("Login successful");
+        return true;
+      } else {
+        _showSnack("Login failed (${response.statusCode})");
+        return false;
+      }
+    } catch (e) {
+      _showSnack("Network error: $e");
+      return false;
+    }
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   @override
@@ -174,11 +206,7 @@ class _GB_LoginState extends State<GB_Login> {
                 elevatedButtonTextColor: kPrimaryColor2,
                 elevatedButtonFontWeight: FontWeight.w500,
                 elevatedButtonTextSize: kElevatedButtonTextSize,
-                onPressed: () {
-                  setState(() {
-                    authenticate_login(credentials);
-                  });
-                },
+                onPressed: () => authenticate_login(credentials),
               ),
               Container(
                 height: 100.0,

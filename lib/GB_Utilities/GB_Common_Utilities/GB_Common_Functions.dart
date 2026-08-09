@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 
 Padding GB_buildTextField(
     {required TextEditingController controller,
@@ -29,10 +28,7 @@ Padding GB_buildTextField(
       ),
       keyboardType: textFieldKeyboardType,
       onChanged: textFieldOnChanged,
-      obscureText: (textFieldLabel == "Password") &&
-              (textFieldLabel == "Confirm Password")
-          ? !textFieldObscureText
-          : textFieldObscureText,
+      obscureText: textFieldObscureText,
     ),
   );
 }

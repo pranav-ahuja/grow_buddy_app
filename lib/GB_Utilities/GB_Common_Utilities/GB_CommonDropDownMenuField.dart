@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
-import 'package:dropdown_button2/dropdown_button2.dart';
 
 class DropDownTextFieldMenu extends StatelessWidget {
-  DropDownTextFieldMenu({
+  const DropDownTextFieldMenu({
     super.key,
-    required this.accountType,
+    required this.onAccountTypeChanged,
   });
 
-  late int accountType;
+  final ValueChanged<int> onAccountTypeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -18,25 +17,20 @@ class DropDownTextFieldMenu extends StatelessWidget {
       inputDecorationTheme: InputDecorationTheme(
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(50.0),
-          borderSide: BorderSide(
-            width: 1000.0,
-          ),
         ),
       ),
-      dropdownMenuEntries: [
+      dropdownMenuEntries: const [
         DropdownMenuEntry(value: "Teacher", label: "Teacher"),
         DropdownMenuEntry(value: "Student", label: "Student"),
       ],
-      label: Text("Account Type"),
+      label: const Text("Account Type"),
       onSelected: (value) {
         if (value == "Teacher") {
-          accountType = accountTypeTeacher;
+          onAccountTypeChanged(accountTypeTeacher);
         } else if (value == "Student") {
-          accountType = accountTypeStudent;
+          onAccountTypeChanged(accountTypeStudent);
         }
       },
     );
   }
-
-  int get getAccountType => accountType;
 }

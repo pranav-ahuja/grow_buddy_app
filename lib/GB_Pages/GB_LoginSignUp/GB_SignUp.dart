@@ -29,10 +29,10 @@ class _GB_SignUpState extends State<GB_SignUp> {
   String confirmPassword = "";
 
   bool passwordCloseButtonPressed = false;
-  IconData passwordVisibilityIcon = Icons.visibility;
+  IconData passwordVisibilityIcon = Icons.visibility_off;
 
   bool confirmPasswordCloseButtonPressed = false;
-  IconData confirmPasswordVisibilityIcon = Icons.visibility;
+  IconData confirmPasswordVisibilityIcon = Icons.visibility_off;
 
   int accountType = 0;
 
@@ -103,11 +103,9 @@ class _GB_SignUpState extends State<GB_SignUp> {
                           setState(() {
                             passwordCloseButtonPressed =
                                 !passwordCloseButtonPressed;
-                            if (passwordCloseButtonPressed) {
-                              passwordVisibilityIcon = Icons.visibility_off;
-                            } else {
-                              passwordVisibilityIcon = Icons.visibility;
-                            }
+                            passwordVisibilityIcon = passwordCloseButtonPressed
+                                ? Icons.visibility
+                                : Icons.visibility_off;
                           });
                         },
                         textFieldLabel: "Password",
@@ -115,7 +113,7 @@ class _GB_SignUpState extends State<GB_SignUp> {
                           password = value;
                         },
                         textFieldKeyboardType: TextInputType.visiblePassword,
-                        textFieldObscureText: passwordCloseButtonPressed,
+                        textFieldObscureText: !passwordCloseButtonPressed,
                       ),
                       GB_buildTextField(
                         controller: _confirmPasswordController,
@@ -124,12 +122,10 @@ class _GB_SignUpState extends State<GB_SignUp> {
                           setState(() {
                             confirmPasswordCloseButtonPressed =
                                 !confirmPasswordCloseButtonPressed;
-                            if (confirmPasswordCloseButtonPressed) {
-                              confirmPasswordVisibilityIcon =
-                                  Icons.visibility_off;
-                            } else {
-                              confirmPasswordVisibilityIcon = Icons.visibility;
-                            }
+                            confirmPasswordVisibilityIcon =
+                                confirmPasswordCloseButtonPressed
+                                    ? Icons.visibility
+                                    : Icons.visibility_off;
                           });
                         },
                         textFieldLabel: "Confirm Password",
@@ -137,7 +133,7 @@ class _GB_SignUpState extends State<GB_SignUp> {
                           confirmPassword = value;
                         },
                         textFieldKeyboardType: TextInputType.visiblePassword,
-                        textFieldObscureText: confirmPasswordCloseButtonPressed,
+                        textFieldObscureText: !confirmPasswordCloseButtonPressed,
                       ),
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 10.0),
@@ -147,9 +143,6 @@ class _GB_SignUpState extends State<GB_SignUp> {
                           inputDecorationTheme: InputDecorationTheme(
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(50.0),
-                              borderSide: BorderSide(
-                                width: 1000.0,
-                              ),
                             ),
                           ),
                           dropdownMenuEntries: [

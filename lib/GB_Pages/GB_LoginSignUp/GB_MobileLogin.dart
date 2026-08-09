@@ -43,7 +43,7 @@ class _GB_MobileLoginState extends State<GB_MobileLogin> {
               ),
               GB_H2HeadingText(
                 inputText:
-                    "Please confirm ypur country code and enter your mobile number",
+                    "Please confirm your country code and enter your mobile number",
                 inputTextAlign: TextAlign.left,
               ),
               Container(
@@ -52,7 +52,7 @@ class _GB_MobileLoginState extends State<GB_MobileLogin> {
                   children: [
                     IntlPhoneField(
                       decoration: InputDecoration(
-                        label: Text("Phone Up"),
+                        label: Text("Phone Number"),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(50.0),
                         ),
