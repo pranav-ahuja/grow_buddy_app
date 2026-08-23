@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The app talks to the GrowBuddy backend, so this is needed in release
+         builds too. (src/debug/AndroidManifest.xml declares it separately for
+         the Flutter tooling's own use during development.) -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:label="grow_buddy_app"
         android:name="${applicationName}"

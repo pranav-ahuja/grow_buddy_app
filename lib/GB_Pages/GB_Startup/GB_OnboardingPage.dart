@@ -24,15 +24,16 @@ class _OnBoardingPageState extends State<OnBoardingPage> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Scaffold(
-        floatingActionButton: GB_FloatingActionButton(
-          floatingActionButtonIcon: Icons.arrow_forward,
-          floatingActionButtonBackgroundColor: kPrimaryColor2,
-          floatingActionButtonForegroundColor: kPrimaryColor1,
-          onPressed: () => loginSignUpPopUpCard(context),
-        ),
-        body: Column(
+    return Scaffold(
+      backgroundColor: kPrimaryColor2,
+      floatingActionButton: GB_FloatingActionButton(
+        floatingActionButtonIcon: Icons.arrow_forward,
+        floatingActionButtonBackgroundColor: kPrimaryColor2,
+        floatingActionButtonForegroundColor: kPrimaryColor1,
+        onPressed: () => loginSignUpPopUpCard(context),
+      ),
+      body: SafeArea(
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             GB_ImageSlider(sliderImageList: sliderImageList),

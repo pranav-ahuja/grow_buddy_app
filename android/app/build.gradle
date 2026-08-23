@@ -25,7 +25,11 @@ if (flutterVersionName == null) {
 android {
     namespace "com.example.grow_buddy_app"
     compileSdk flutter.compileSdkVersion
-    ndkVersion flutter.ndkVersion
+    // Pinned above Flutter's default (26.3.11579264) because
+    // google_sign_in_android requires 27.0.12077973. NDK versions are backward
+    // compatible, so the highest requirement across all plugins wins. Revisit
+    // when upgrading Flutter, which may raise flutter.ndkVersion past this.
+    ndkVersion "27.0.12077973"
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11

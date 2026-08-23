@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_Login.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
+import 'package:grow_buddy_app/GB_Services/GB_AuthApi.dart';
+import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Classes.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Functions.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
@@ -34,7 +37,60 @@ class _GB_SignUpState extends State<GB_SignUp> {
   bool confirmPasswordCloseButtonPressed = false;
   IconData confirmPasswordVisibilityIcon = Icons.visibility_off;
 
-  int accountType = 0;
+  // Null until the user actually picks one, so nobody is silently registered
+  // as a teacher just because that constant happens to be 0.
+  int? accountType;
+
+  bool isSubmitting = false;
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _signUp() async {
+    if (fullName.trim().isEmpty) {
+      _showSnack("Please enter your full name");
+      return;
+    }
+    if (emailID_phoneNum.trim().isEmpty) {
+      _showSnack("Please enter your email id or phone number");
+      return;
+    }
+    if (password.length < 8) {
+      _showSnack("Password must be at least 8 characters");
+      return;
+    }
+    if (password != confirmPassword) {
+      _showSnack("Passwords do not match");
+      return;
+    }
+    if (accountType == null) {
+      _showSnack("Please choose an account type");
+      return;
+    }
+
+    setState(() => isSubmitting = true);
+    try {
+      final result = await GB_AuthApi.signUp(
+        fullName: fullName.trim(),
+        identifier: emailID_phoneNum.trim(),
+        password: password,
+        accountType: accountType!,
+      );
+
+      if (!mounted) return;
+      // Sets the session and picks the destination from needsAccountType. A
+      // password sign-up already chose a role, so this lands on the dashboard.
+      gRouteAfterAuth(context, result);
+    } on GB_ApiException catch (error) {
+      _showSnack(error.message);
+    } finally {
+      if (mounted) setState(() => isSubmitting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -167,14 +223,13 @@ class _GB_SignUpState extends State<GB_SignUp> {
                           screenWidth: screenWidth,
                           horizontalPadding: 0.2,
                           verticalPadding: 10.0,
-                          elevatedButtonText: "Sign up",
+                          elevatedButtonText:
+                              isSubmitting ? "Creating account..." : "Sign up",
                           buttonColor: kPrimaryColor1,
                           elevatedButtonTextColor: kPrimaryColor2,
                           elevatedButtonFontWeight: FontWeight.w500,
                           elevatedButtonTextSize: kElevatedButtonTextSize,
-                          onPressed: () {
-                            print("Account Type = $accountType");
-                          },
+                          onPressed: isSubmitting ? null : _signUp,
                         ),
                       ),
                       Padding(
@@ -193,7 +248,9 @@ class _GB_SignUpState extends State<GB_SignUp> {
                                         kElevatedButtonIconSize,
                                     elevatedButtonPadding:
                                         kEvelatedButtonPadding,
-                                    onPressed: () {},
+                                    onPressed: isSubmitting
+                                        ? null
+                                        : () => gSignInWithGoogle(context),
                                   ),
                                   GB_ElevatedButtonIcons(
                                     elevatedButtonIcon: MaterialSymbols.call,

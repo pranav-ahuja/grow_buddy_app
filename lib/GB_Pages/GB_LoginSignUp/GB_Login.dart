@@ -1,13 +1,17 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_ForgotPassword.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_SignUp.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
+import 'package:grow_buddy_app/GB_Services/GB_AuthApi.dart';
+import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Classes.dart';
-import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Globals.dart';
-import 'package:http/http.dart' as http;
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Buttons.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_TextButton.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Functions.dart';
+import 'package:colorful_iconify_flutter/icons/logos.dart';
+import 'package:iconify_flutter/icons/material_symbols.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_MobileLogin.dart';
 
 class GB_Login extends StatefulWidget {
   const GB_Login({super.key});
@@ -36,6 +40,8 @@ class _GB_LoginState extends State<GB_Login> {
   Color checkBoxColor = kPrimaryColor2;
   Color rememberMeColor = Colors.grey;
 
+  bool isSubmitting = false;
+
   Future<bool> authenticate_login(Map<String, String> credentials) async {
     if ((credentials["emailID"] ?? "").isEmpty ||
         (credentials["password"] ?? "").isEmpty) {
@@ -43,44 +49,24 @@ class _GB_LoginState extends State<GB_Login> {
       return false;
     }
 
+    setState(() => isSubmitting = true);
     try {
-      final response = await http.post(
-        Uri.parse(kLoginUrl),
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
-        body: jsonEncode({
-          "email": credentials["emailID"],
-          "password": credentials["password"],
-        }),
+      final result = await GB_AuthApi.login(
+        email: credentials["emailID"]!,
+        password: credentials["password"]!,
       );
 
-      if (response.statusCode == 200) {
-        // TODO: confirm backend response shape.
-        // If it returns {"token": "..."}, use jsonDecode(response.body)["token"].
-        // If it returns the raw token string, response.body is the token.
-        String token;
-        try {
-          final decoded = jsonDecode(response.body);
-          token = decoded is Map<String, dynamic> && decoded["token"] != null
-              ? decoded["token"].toString()
-              : response.body;
-        } catch (_) {
-          token = response.body;
-        }
-        gLoginToken = token;
-        credentials["token"] = token;
-        // TODO: Navigate to home/dashboard page here once it exists.
-        _showSnack("Login successful");
-        return true;
-      } else {
-        _showSnack("Login failed (${response.statusCode})");
-        return false;
-      }
-    } catch (e) {
-      _showSnack("Network error: $e");
+      credentials["token"] = result.token;
+
+      if (!mounted) return false;
+      // Sets the session and picks the destination from needsAccountType.
+      gRouteAfterAuth(context, result);
+      return true;
+    } on GB_ApiException catch (error) {
+      _showSnack(error.message);
       return false;
+    } finally {
+      if (mounted) setState(() => isSubmitting = false);
     }
   }
 
@@ -201,12 +187,42 @@ class _GB_LoginState extends State<GB_Login> {
                 screenWidth: screenWidth,
                 horizontalPadding: 0.2,
                 verticalPadding: kElevatedButtonVerticalPadding,
-                elevatedButtonText: "Login",
+                elevatedButtonText: isSubmitting ? "Logging in..." : "Login",
                 buttonColor: kPrimaryColor1,
                 elevatedButtonTextColor: kPrimaryColor2,
                 elevatedButtonFontWeight: FontWeight.w500,
                 elevatedButtonTextSize: kElevatedButtonTextSize,
-                onPressed: () => authenticate_login(credentials),
+                onPressed:
+                    isSubmitting ? null : () => authenticate_login(credentials),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 20.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    GB_ElevatedButtonIcons(
+                      elevatedButtonIcon: Logos.google_icon,
+                      elevatedButtonIconSize: kElevatedButtonIconSize,
+                      elevatedButtonPadding: kEvelatedButtonPadding,
+                      onPressed: isSubmitting
+                          ? null
+                          : () => gSignInWithGoogle(context),
+                    ),
+                    GB_ElevatedButtonIcons(
+                      elevatedButtonIcon: MaterialSymbols.call,
+                      elevatedButtonIconSize: kElevatedButtonIconSize,
+                      elevatedButtonPadding: kEvelatedButtonPadding,
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => GB_MobileLogin(),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
               Container(
                 height: 100.0,
@@ -214,7 +230,14 @@ class _GB_LoginState extends State<GB_Login> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     GB_TextButton(
-                      onPressed: () {},
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => GB_ForgotPassword(),
+                          ),
+                        );
+                      },
                       textButtonColor: Colors.black54,
                       textButtonText: "Forgot Password?",
                     ),

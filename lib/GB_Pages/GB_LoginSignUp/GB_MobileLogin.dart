@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_Verify.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
+import 'package:grow_buddy_app/GB_Services/GB_AuthApi.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Classes.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Buttons.dart';
@@ -19,6 +21,42 @@ class _GB_MobileLoginState extends State<GB_MobileLogin> {
   Color nextButtonTextColor = Colors.black54;
 
   String phoneNumber = "";
+  bool isSubmitting = false;
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _requestOtp() async {
+    if (phoneNumber.isEmpty) {
+      _showSnack("Please enter your mobile number");
+      return;
+    }
+
+    setState(() => isSubmitting = true);
+    try {
+      final result = await GB_AuthApi.requestOtp(phoneNumber);
+
+      // Carries the dev code in a debug build; plain wording otherwise.
+      _showSnack(result.displayMessage);
+
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => GB_Verify(phoneNumber: phoneNumber),
+        ),
+      );
+    } on GB_ApiException catch (error) {
+      _showSnack(error.message);
+    } finally {
+      if (mounted) setState(() => isSubmitting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
@@ -66,7 +104,9 @@ class _GB_MobileLoginState extends State<GB_MobileLogin> {
                       initialCountryCode: 'IN',
                       onChanged: (value) {
                         setState(() {
-                          phoneNumber = value.toString();
+                          // completeNumber is "+919876543210"; toString() would
+                          // hand back the PhoneNumber object's description.
+                          phoneNumber = value.completeNumber;
                           if (phoneNumber.isNotEmpty) {
                             nextButtonColor = kPrimaryColor1;
                             nextButtonTextColor = kPrimaryColor2;
@@ -87,21 +127,12 @@ class _GB_MobileLoginState extends State<GB_MobileLogin> {
                   screenWidth: screenWidth,
                   horizontalPadding: 0.2,
                   verticalPadding: 10.0,
-                  elevatedButtonText: "Next",
+                  elevatedButtonText: isSubmitting ? "Sending..." : "Next",
                   buttonColor: nextButtonColor,
                   elevatedButtonTextColor: nextButtonTextColor,
                   elevatedButtonFontWeight: FontWeight.w500,
                   elevatedButtonTextSize: kElevatedButtonTextSize,
-                  onPressed: () {
-                    if (phoneNumber.isNotEmpty) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => GB_Verify(),
-                        ),
-                      );
-                    }
-                  },
+                  onPressed: isSubmitting ? null : _requestOtp,
                 ),
               ),
               Padding(

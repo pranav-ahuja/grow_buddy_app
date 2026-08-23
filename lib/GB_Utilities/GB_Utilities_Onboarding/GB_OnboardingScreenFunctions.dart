@@ -7,6 +7,7 @@ import 'package:colorful_iconify_flutter/icons/logos.dart';
 import 'package:iconify_flutter/icons/material_symbols.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Classes.dart';
+import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
 
 void loginSignUpPopUpCard(BuildContext context) {
   double screenWidth = MediaQuery.of(context).size.width;
@@ -79,7 +80,8 @@ void loginSignUpPopUpCard(BuildContext context) {
                     elevatedButtonIcon: Logos.google_icon,
                     elevatedButtonIconSize: kElevatedButtonIconSize,
                     elevatedButtonPadding: kEvelatedButtonPadding,
-                    onPressed: () {},
+                    // Routing from here clears the whole stack, dialog included.
+                    onPressed: () => gSignInWithGoogle(context),
                   ),
                   GB_ElevatedButtonIcons(
                     elevatedButtonIcon: MaterialSymbols.call,

@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:another_flutter_splash_screen/another_flutter_splash_screen.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
-import 'package:grow_buddy_app/GB_Pages/GB_Startup/GB_OnboardingPage.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Startup/GB_SessionGate.dart';
 
 void main() {
   runApp(const GroweBuddyMain());
@@ -31,7 +31,9 @@ class GroweBuddyMain extends StatelessWidget {
           ),
         ),
         onAnimationEnd: () => print("On Fade In End"),
-        nextScreen: OnBoardingPage(),
+        // The gate, not the onboarding page: a stored session should resume
+        // straight to the dashboard rather than asking the user to log in again.
+        nextScreen: const GB_SessionGate(),
       ),
     );
   }
