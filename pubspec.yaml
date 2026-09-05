@@ -45,6 +45,18 @@ dependencies:
   http: ^1.2.2
   google_sign_in: ^7.2.0
   flutter_secure_storage: ^9.2.4
+  # The optional student photo on the register-student form. Gallery picking
+  # needs no runtime permission on modern Android (it goes through the system
+  # photo picker); the camera source does, and the plugin asks for it itself.
+  image_picker: ^1.1.2
+  # Reads and writes the .xlsx a class is archived to when it is deleted, and
+  # restored from when it is uploaded back in. Pure Dart, so no platform channel.
+  excel: ^4.0.6
+  # The system "Save as" and "Open" dialogs for that archive file. Used rather
+  # than writing to /Download directly: on Android 10+ that path needs either
+  # MediaStore or a broad storage permission, where the system dialog needs
+  # neither and lets the teacher choose where the file lands.
+  file_picker: ^8.1.7
 
 dev_dependencies:
   flutter_test:
@@ -98,3 +110,4 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/custom-fonts/#from-packages
+

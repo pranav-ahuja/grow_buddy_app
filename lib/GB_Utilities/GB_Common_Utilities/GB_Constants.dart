@@ -51,6 +51,7 @@ const double kClassTileRadius = 12.0;
 const double kClassTilePadding = 16.0;
 const double kClassTileGap = 12.0;
 const double kClassTileAvatarRadius = 24.0;
+const double kClassDeleteIconSize = 22.0;
 const double kHomeHorizontalPadding = 16.0;
 
 //Home Screen Text Sizes
@@ -65,6 +66,85 @@ const double kHomeNavUnselectedTextSize = 12.0;
 //Home Screen Assets
 const String kClassAvatarImage = "assets/images/hs_classes.jpeg";
 const String kEventImage = "assets/images/hs_events.png";
+
+//Class Screen
+// From the Figma frame `360-45584`. The header panel carries the class's own
+// tint and rounds off at the bottom; the feature and student rows are white
+// cards on a faint vertical wash.
+const double kClassPanelHeight = 352.0;
+const double kClassPanelRadius = 24.0;
+const double kClassAppBarTitleSize = 22.0;
+const double kClassSectionHeaderSize = 18.0;
+const double kClassWelcomeTextSize = 18.0;
+const double kClassSeeAllTextSize = 12.0;
+
+const double kFeatureCardWidth = 92.0;
+const double kFeatureCardHeight = 120.0;
+const double kFeatureCardRadius = 20.0;
+const double kFeatureIconSize = 60.0;
+const double kFeatureLabelTextSize = 14.0;
+const double kFeatureRowGap = 24.0;
+
+/// The student id the app assigns on registration, e.g. "GB-0007".
+///
+/// A prefix plus a zero-padded serial rather than the bare row number: the id
+/// is read aloud and written on paper registers, and "7" is not something a
+/// teacher can recognise as a student id once it is off the screen. Four digits
+/// carry a school to 9999 pupils before the format has to grow.
+const String kStudentIdPrefix = "GB-";
+const int kStudentIdDigits = 4;
+
+const double kStudentCardWidth = 92.0;
+const double kStudentCardHeight = 120.0;
+const double kStudentAvatarRadius = 30.0;
+const double kStudentNameTextSize = 16.0;
+/// The caption under a name on a student card. The design drew an age there;
+/// the card shows the student id instead, at the same size.
+const double kStudentIdTextSize = 12.0;
+const double kStudentRowGap = 16.0;
+
+/// The faint top-to-bottom wash behind the horizontal card rows.
+const Color kClassRowWashColor = Color(0xffF1F1F1);
+
+/// Shared by the class cards, feature cards, and student cards.
+const Color kClassCardShadowColor = Color(0x40E0DBDB);
+
+//Register Student Sheet
+// From the Figma frame `360-44515`. The sheet is a gold-edged card that fades
+// from the app's cream to white, carrying a stack of outlined fields.
+//
+// The two alpha colours are Figma's own: rgba(201,149,1,0.5) for the sheet edge
+// and rgba(90,73,3,0.5) for the field outlines. They are kept with their alpha
+// rather than flattened because the sheet's own background is a gradient, so
+// there is no single colour to flatten them onto.
+const Color kSheetGradientTopColor = Color(0xffFFFCF3);
+const Color kSheetBorderColor = Color(0x80C99501);
+const Color kSheetHandleColor = Color(0x665A4903);
+const Color kFieldBorderColor = Color(0x805A4903);
+
+const double kSheetTopRadius = 28.0;
+const double kSheetHorizontalPadding = 16.0;
+
+/// The sheet's share of the screen. Below the full height so the dashboard
+/// stays visible behind it and the sheet still reads as a sheet.
+const double kSheetHeightFraction = 0.92;
+
+const double kFieldRadius = 4.0;
+
+/// Figma draws each field in a 76pt slot: a 56pt box with 20pt beneath it.
+const double kFieldGap = 20.0;
+const double kFieldRowGap = 16.0;
+const double kFieldLabelTextSize = 12.0;
+const double kFieldInputTextSize = 16.0;
+
+const double kSheetIntroTextSize = 16.0;
+const double kSheetSectionTextSize = 14.0;
+const double kRegisterAvatarRadius = 40.0;
+
+const double kPillButtonRadius = 100.0;
+const double kPillButtonTextSize = 14.0;
+const double kPillButtonHorizontalPadding = 20.0;
+const double kPillButtonVerticalPadding = 10.0;
 
 //Floating Action Button Constants
 const double kFloatingButtonCircularRadius = 15.0;

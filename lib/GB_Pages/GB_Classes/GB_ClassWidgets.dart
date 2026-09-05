@@ -1,0 +1,253 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassModels.dart';
+import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
+
+/// A section heading on the class screen, optionally with a "See All" action
+/// on the right — "Students list" is the one that has it.
+class GB_ClassSectionHeader extends StatelessWidget {
+  const GB_ClassSectionHeader({
+    super.key,
+    required this.title,
+    this.onSeeAll,
+  });
+
+  final String title;
+
+  /// When null, no "See All" is drawn — that is how "Features" renders.
+  final VoidCallback? onSeeAll;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: kClassSectionHeaderSize,
+            height: 24.0 / kClassSectionHeaderSize,
+            fontWeight: FontWeight.w500,
+            color: kHomeTitleTextColor,
+          ),
+        ),
+        if (onSeeAll != null)
+          GestureDetector(
+            onTap: onSeeAll,
+            // Opaque so the tap lands anywhere in the padded box, not only on
+            // the glyphs themselves.
+            behavior: HitTestBehavior.opaque,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4.0, horizontal: 2.0),
+              child: Text(
+                "See All",
+                style: TextStyle(
+                  fontSize: kClassSeeAllTextSize,
+                  height: 1.5,
+                  color: kHomeAccentColor,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// The white rounded card shared by the feature and student rows: same size,
+/// radius, and shadow, differing only in what they stack inside.
+class GB_ClassRowCard extends StatelessWidget {
+  const GB_ClassRowCard({
+    super.key,
+    required this.child,
+    this.onTap,
+  });
+
+  final Widget child;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: kPrimaryColor2,
+      borderRadius: BorderRadius.circular(kFeatureCardRadius),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(kFeatureCardRadius),
+        child: Container(
+          width: kFeatureCardWidth,
+          height: kFeatureCardHeight,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(kFeatureCardRadius),
+            boxShadow: const [
+              BoxShadow(
+                color: kClassCardShadowColor,
+                blurRadius: 10.0,
+                offset: Offset(0.0, 4.0),
+              ),
+            ],
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// One tile in the "Features" row: illustrated icon over a label.
+class GB_FeatureCard extends StatelessWidget {
+  const GB_FeatureCard({
+    super.key,
+    required this.feature,
+    this.onTap,
+  });
+
+  final GB_ClassFeature feature;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GB_ClassRowCard(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Image.asset(
+            feature.iconPath,
+            width: kFeatureIconSize,
+            height: kFeatureIconSize,
+            // contain, not cover: the source art is not all square, and cover
+            // would crop the taller ones.
+            fit: BoxFit.contain,
+          ),
+          const SizedBox(height: 8.0),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6.0),
+            child: Text(
+              feature.label,
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: kFeatureLabelTextSize,
+                fontWeight: FontWeight.w500,
+                color: kTextColor,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One tile in the "Students list" row: round photo over name and age.
+class GB_StudentCard extends StatelessWidget {
+  const GB_StudentCard({
+    super.key,
+    required this.student,
+    this.onTap,
+  });
+
+  final GB_Student student;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GB_ClassRowCard(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircleAvatar(
+            radius: kStudentAvatarRadius,
+            // The registered photo when there is one, the stock asset when the
+            // teacher skipped it — the photo field is optional.
+            backgroundImage: student.photoPath == null
+                ? AssetImage(student.imagePath) as ImageProvider
+                : FileImage(File(student.photoPath!)),
+          ),
+          const SizedBox(height: 8.0),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  student.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: kStudentNameTextSize,
+                    fontWeight: FontWeight.w500,
+                    color: kTextColor,
+                  ),
+                ),
+                // The student id, not the age: the card is an index into the
+                // class, and the id is what a teacher looks a pupil up by.
+                // Everything else the form collects lives on the profile.
+                Text(
+                  student.studentId,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: kStudentIdTextSize,
+                    letterSpacing: 0.4,
+                    color: kHomeSubtitleTextColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The horizontally scrolling strip the feature and student rows both sit in,
+/// including the design's faint vertical wash behind the cards.
+class GB_ClassCardRow extends StatelessWidget {
+  const GB_ClassCardRow({
+    super.key,
+    required this.children,
+    required this.gap,
+    this.padding = const EdgeInsets.symmetric(horizontal: kHomeHorizontalPadding),
+  });
+
+  final List<Widget> children;
+  final double gap;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [kPrimaryColor2, kClassRowWashColor, kPrimaryColor2],
+          stops: [0.0, 0.5, 1.0],
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 16.0),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: padding,
+        child: Row(
+          children: [
+            for (int index = 0; index < children.length; index++) ...[
+              if (index > 0) SizedBox(width: gap),
+              children[index],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}

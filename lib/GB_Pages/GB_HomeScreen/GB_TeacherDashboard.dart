@@ -1,5 +1,16 @@
+import 'dart:typed_data';
+
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_AddClassSheet.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassArchive.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassArchiveFile.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassDialogs.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassModels.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassScreen.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassStore.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_RegisterStudentSheet.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentStore.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeAppBar.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeWidgets.dart';
@@ -9,9 +20,9 @@ import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dar
 /// The teacher's home screen: an events carousel, the class list, a "register
 /// new student" action, and the four-tab bottom bar.
 ///
-/// Everything shown is placeholder data — the backend has no events or classes
-/// endpoint yet. [_events] and [_classes] are the two seams to replace when it
-/// does; the widgets below already take their content from those lists.
+/// The classes come from [GB_ClassStore], so the list reflects anything the
+/// teacher adds. Events are still placeholder data — [_events] is the seam to
+/// replace when the backend grows an events endpoint.
 class GB_TeacherDashboard extends StatefulWidget {
   const GB_TeacherDashboard({super.key});
 
@@ -45,22 +56,119 @@ class _GB_TeacherDashboardState extends State<GB_TeacherDashboard> {
     ),
   ];
 
-  /// The mockup's five classes, each taking the next tint from the palette.
-  static final List<GB_ClassInfo> _classes = [
-    "Daycare",
-    "Playgroup",
-    "Pre Nursery",
-    "Nursery",
-    "KG",
-  ].indexed.map((entry) {
-    return GB_ClassInfo(
-      name: entry.$2,
-      subtitle: "no. of students",
-      imagePath: kClassAvatarImage,
-      fillColor: GB_ClassPalette.fillAt(entry.$1),
-      borderColor: GB_ClassPalette.borderAt(entry.$1),
+  void _openClass(GB_ClassInfo classInfo) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => GB_ClassScreen(classInfo: classInfo),
+      ),
     );
-  }).toList();
+  }
+
+  Future<void> _addClass() async {
+    final GB_ClassInfo? created = await GB_AddClassSheet.show(context);
+
+    // Null means the teacher dismissed the sheet. The list repaints itself off
+    // the store, so there is nothing to do here but confirm.
+    if (created == null || !mounted) return;
+
+    // A class restored from a file arrives with its students already in the
+    // store, so the count is what says whether this was a fresh class or a
+    // recovery.
+    final int restored = GB_StudentStore.countInClass(created.id);
+    gShowSnack(
+      context,
+      restored == 0
+          ? "${created.name} added"
+          : "${created.name} restored with $restored "
+              "${restored == 1 ? "student" : "students"}",
+    );
+  }
+
+  /// Deletes a class, but only after its archive has actually been written.
+  ///
+  /// The order matters and is the whole safety net: confirm, save, then delete.
+  /// If the teacher backs out of the save dialog the class stays exactly as it
+  /// was — deleting anyway would be the one case where "you can restore it from
+  /// the file" is a lie.
+  Future<void> _deleteClass(GB_ClassInfo classInfo) async {
+    final List<GB_Student> students = GB_StudentStore.inClass(classInfo.id);
+
+    final bool confirmed = await gConfirmDeleteClass(
+      context,
+      classInfo: classInfo,
+      studentCount: students.length,
+    );
+    if (!confirmed || !mounted) return;
+
+    final Uint8List bytes;
+    try {
+      bytes = GB_ClassArchive.encode(
+        className: classInfo.name,
+        students: students,
+      );
+    } on GB_ClassArchiveException catch (error) {
+      if (!mounted) return;
+      gShowSnack(context, error.message);
+      return;
+    }
+
+    final String? savedTo = await GB_ClassArchiveFile.save(
+      fileName: GB_ClassArchive.fileNameFor(classInfo.name),
+      bytes: bytes,
+    );
+    if (!mounted) return;
+
+    if (savedTo == null) {
+      gShowSnack(context, "${classInfo.name} was not deleted — no file saved");
+      return;
+    }
+
+    GB_StudentStore.removeStudentsInClass(classInfo.id);
+    GB_ClassStore.removeClass(classInfo.id);
+
+    gShowSnack(context, "${classInfo.name} deleted — class file saved");
+  }
+
+  /// The caption under a class name.
+  ///
+  /// Keeps the design's "no. of students" placeholder while a class is empty —
+  /// "0 students" reads as a failure, where the placeholder reads as a column
+  /// heading waiting to be filled.
+  String? _studentCountLabel(int classId) {
+    final int count = GB_StudentStore.countInClass(classId);
+    if (count == 0) return null;
+    return count == 1 ? "1 student" : "$count students";
+  }
+
+  Future<void> _registerStudent() async {
+    final GB_Student? created = await GB_RegisterStudentSheet.show(context);
+
+    // Null means the teacher dismissed the sheet. The list repaints itself off
+    // the store, so there is nothing to do here but confirm.
+    if (created == null || !mounted) return;
+
+    // The design's third screen is "Student added to the class", so the
+    // confirmation names the class when there is one — a student registered
+    // without a class has not been added to anything, and saying so would be
+    // untrue.
+    final String? className = created.classId == null
+        ? null
+        : GB_ClassStore.classes.value
+            .where((GB_ClassInfo item) => item.id == created.classId)
+            .map((GB_ClassInfo item) => item.name)
+            .firstOrNull;
+
+    // The id is named here because registration is the only place it is
+    // announced — everywhere else the teacher has to already know which student
+    // card to go and look at.
+    gShowSnack(
+      context,
+      className == null
+          ? "${created.name} registered as ${created.studentId}"
+          : "${created.name} added to $className as ${created.studentId}",
+    );
+  }
 
   void _onTabTapped(int index) {
     if (index == 0) {
@@ -114,19 +222,43 @@ class _GB_TeacherDashboardState extends State<GB_TeacherDashboard> {
             // A sliver list rather than a Column of tiles: the class list is the
             // only part that grows with the data, so it is what should scroll
             // lazily under the fixed carousel above it.
+            //
+            // Wrapped in a ValueListenableBuilder so adding a class repaints
+            // the list without this screen holding a copy that could drift out
+            // of step with the store.
             SliverPadding(
               padding: const EdgeInsets.symmetric(
                 horizontal: kHomeHorizontalPadding,
               ),
-              sliver: SliverList.builder(
-                itemCount: _classes.length,
-                itemBuilder: (context, index) => GB_ClassTile(
-                  classInfo: _classes[index],
-                  onTap: () => gShowSnack(
-                    context,
-                    "${_classes[index].name} is coming soon",
-                  ),
-                ),
+              sliver: ValueListenableBuilder<List<GB_ClassInfo>>(
+                valueListenable: GB_ClassStore.classes,
+                builder: (context, classes, _) {
+                  // Nested on the students too, so registering one updates the
+                  // count under its class name without this screen recomputing
+                  // anything itself.
+                  return ValueListenableBuilder<List<GB_Student>>(
+                    valueListenable: GB_StudentStore.students,
+                    builder: (context, _, __) {
+                      return SliverList.builder(
+                        // One past the classes for the "Add a class" tile that
+                        // closes the list.
+                        itemCount: classes.length + 1,
+                        itemBuilder: (context, index) {
+                          if (index == classes.length) {
+                            return GB_AddClassTile(onTap: _addClass);
+                          }
+
+                          return GB_ClassTile(
+                            classInfo: classes[index],
+                            subtitle: _studentCountLabel(classes[index].id),
+                            onTap: () => _openClass(classes[index]),
+                            onDelete: () => _deleteClass(classes[index]),
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
               ),
             ),
             // Clears the FAB so the last class tile is never trapped under it.
@@ -135,8 +267,7 @@ class _GB_TeacherDashboardState extends State<GB_TeacherDashboard> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () =>
-            gShowSnack(context, "Register new student is coming soon"),
+        onPressed: _registerStudent,
         backgroundColor: kHomeAccentColor,
         foregroundColor: kPrimaryColor2,
         // The design rings the button in white so it stays separated from the

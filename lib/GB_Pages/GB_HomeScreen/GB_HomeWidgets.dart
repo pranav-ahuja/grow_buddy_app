@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeModels.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 
@@ -150,11 +151,23 @@ class GB_ClassTile extends StatelessWidget {
   const GB_ClassTile({
     super.key,
     required this.classInfo,
+    this.subtitle,
     this.onTap,
+    this.onDelete,
   });
 
   final GB_ClassInfo classInfo;
+
+  /// Overrides [GB_ClassInfo.subtitle] — how the dashboard swaps the design's
+  /// "no. of students" caption for the real count once students are registered.
+  /// Null falls back to whatever the class itself carries.
+  final String? subtitle;
+
   final VoidCallback? onTap;
+
+  /// Shown as a trailing bin icon when set. Null draws no button at all, so a
+  /// tile can be listed somewhere deleting is not on offer.
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -206,7 +219,7 @@ class GB_ClassTile extends StatelessWidget {
                       ),
                       const SizedBox(height: 4.0),
                       Text(
-                        classInfo.subtitle,
+                        subtitle ?? classInfo.subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -215,6 +228,80 @@ class GB_ClassTile extends StatelessWidget {
                         ),
                       ),
                     ],
+                  ),
+                ),
+                if (onDelete != null)
+                  // An IconButton, not a bare Icon in a GestureDetector: it
+                  // handles its own taps, so pressing the bin cannot fall
+                  // through to the InkWell and open the class instead of
+                  // deleting it.
+                  IconButton(
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline),
+                    color: kHomeSubtitleTextColor,
+                    iconSize: kClassDeleteIconSize,
+                    // Sits inside a 80pt tile, so the default 48pt tap target
+                    // plus its padding would push the row taller than the
+                    // design's card.
+                    visualDensity: VisualDensity.compact,
+                    tooltip: "Delete ${classInfo.name}",
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The tile that closes the class list and opens the add-class form.
+///
+/// Sits in the list rather than in the app bar or beside the FAB: adding a
+/// class is a thing you do *to this list*, and the design already spends the
+/// FAB on registering a student. Its outline and muted fill keep it reading as
+/// an action rather than as another class.
+class GB_AddClassTile extends StatelessWidget {
+  const GB_AddClassTile({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: kClassTileGap),
+      child: Material(
+        color: kPrimaryColor2,
+        borderRadius: BorderRadius.circular(kClassTileRadius),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(kClassTileRadius),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(kClassTileRadius),
+              border: Border.all(color: kHomeNavBorderColor),
+            ),
+            padding: const EdgeInsets.all(kClassTilePadding),
+            child: Row(
+              children: [
+                Container(
+                  width: kClassTileAvatarRadius * 2,
+                  height: kClassTileAvatarRadius * 2,
+                  decoration: const BoxDecoration(
+                    color: kClassRowWashColor,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.add, color: kHomeAccentColor),
+                ),
+                const SizedBox(width: 24.0),
+                const Expanded(
+                  child: Text(
+                    "Add a class",
+                    style: TextStyle(
+                      fontSize: kHomeCardTitleTextSize,
+                      fontWeight: FontWeight.w500,
+                      color: kHomeAccentColor,
+                    ),
                   ),
                 ),
               ],
