@@ -62,6 +62,15 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  # Drives the real app on a device from Dart, with the actual widget tree in
+  # scope. See testcases/README.md.
+  integration_test:
+    sdk: flutter
+
+  # Imported directly by testcases/support/mock_storage.dart, which swaps in
+  # the in-memory storage double the plugin ships.
+  flutter_secure_storage_platform_interface: ^1.1.2
+
   # Generates the Android and iOS launcher icon sets from one source image.
   # Run `dart run flutter_launcher_icons` after changing the source art.
   flutter_launcher_icons: ^0.14.1

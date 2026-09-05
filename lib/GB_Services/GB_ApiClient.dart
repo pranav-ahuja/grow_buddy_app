@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 /// Any failure the UI can show to the user as-is.
@@ -19,6 +20,14 @@ class GB_ApiException implements Exception {
 class GB_ApiClient {
   static const Duration _timeout = Duration(seconds: 15);
 
+  /// The client every request goes through.
+  ///
+  /// A field rather than the top-level `http.post`/`get`/`patch` helpers so
+  /// tests can swap in a `MockClient` and exercise the whole app without a
+  /// server. Production code never assigns it.
+  @visibleForTesting
+  static http.Client client = http.Client();
+
   static Map<String, String> _headers({String? token}) {
     return {
       "Content-Type": "application/json",
@@ -33,7 +42,7 @@ class GB_ApiClient {
     String? token,
   }) async {
     return _send(
-      () => http.post(
+      () => client.post(
         Uri.parse(url),
         headers: _headers(token: token),
         body: jsonEncode(body),
@@ -47,7 +56,7 @@ class GB_ApiClient {
     String? token,
   }) async {
     return _send(
-      () => http.patch(
+      () => client.patch(
         Uri.parse(url),
         headers: _headers(token: token),
         body: jsonEncode(body),
@@ -60,7 +69,7 @@ class GB_ApiClient {
     String? token,
   }) async {
     return _send(
-      () => http.get(Uri.parse(url), headers: _headers(token: token)),
+      () => client.get(Uri.parse(url), headers: _headers(token: token)),
     );
   }
 
