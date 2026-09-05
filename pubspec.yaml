@@ -62,6 +62,13 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  # Generates the Android and iOS launcher icon sets from one source image.
+  # Run `dart run flutter_launcher_icons` after changing the source art.
+  flutter_launcher_icons: ^0.14.1
+  # Used by tool/gb_make_app_icon.dart to square off the logo before the
+  # generator sees it.
+  image: ^4.2.0
+
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
@@ -111,3 +118,19 @@ flutter:
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/custom-fonts/#from-packages
 
+# Launcher icon generation. Source art is assets/images/splash_image.png; the
+# square canvases below are produced from it by tool/gb_make_app_icon.dart.
+# After changing the logo, run both:
+#   dart run tool/gb_make_app_icon.dart
+#   dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "tool/icon/app_icon.png"
+  # Android adaptive icon: the launcher masks the foreground to its own shape
+  # over this background, so the two are supplied separately.
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "tool/icon/app_icon_foreground.png"
+  # iOS rejects icons with an alpha channel, and the source logo has one.
+  remove_alpha_ios: true
+  min_sdk_android: 21
