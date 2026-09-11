@@ -7,8 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.database import Base, engine
-from app.routers import auth
+from app.database import create_schema, engine
+from app.routers import auth, classes
 
 logging.basicConfig(level=logging.INFO)
 
@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
 
     # Fine while the schema is small and changing daily. Switch to Alembic
     # migrations before there is production data worth keeping.
-    Base.metadata.create_all(bind=engine)
+    create_schema(engine)
     yield
 
 
@@ -72,3 +72,4 @@ def health() -> dict[str, str]:
 
 
 app.include_router(auth.router, prefix=settings.api_prefix)
+app.include_router(classes.router, prefix=settings.api_prefix)

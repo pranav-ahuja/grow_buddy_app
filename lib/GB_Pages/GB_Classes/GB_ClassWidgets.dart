@@ -188,9 +188,21 @@ class GB_StudentCard extends StatelessWidget {
                     color: kTextColor,
                   ),
                 ),
-                // The student id, not the age: the card is an index into the
-                // class, and the id is what a teacher looks a pupil up by.
-                // Everything else the form collects lives on the profile.
+                // The roll number and student id, not the age: the card is an
+                // index into the class, and these are what a teacher calls a
+                // pupil by and looks them up by. Everything else the form
+                // collects lives on the profile.
+                if (student.rollNumber != null)
+                  Text(
+                    "Roll No. ${student.rollNumber}",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: kStudentIdTextSize,
+                      fontWeight: FontWeight.w500,
+                      color: kHomeTitleTextColor,
+                    ),
+                  ),
                 Text(
                   student.studentId,
                   maxLines: 1,
@@ -246,6 +258,121 @@ class GB_ClassCardRow extends StatelessWidget {
               children[index],
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The row of pastel swatches that picks a class's colour, shared by "Add a
+/// class" and "Edit class" so the two offer exactly the same choice.
+///
+/// Stateless and driven by [selectedSlot]: the form owns the choice, because it
+/// is the form that has to send it to [GB_ClassStore] on Save.
+///
+/// Wraps rather than scrolls. A horizontal strip would hide the later colours
+/// off the edge of a sheet, and a colour a teacher cannot see is one they will
+/// not pick.
+class GB_ClassColorPicker extends StatelessWidget {
+  const GB_ClassColorPicker({
+    super.key,
+    required this.selectedSlot,
+    required this.onSelected,
+    this.label = "Theme colour",
+  });
+
+  /// Index into [GB_ClassPalette.all].
+  final int selectedSlot;
+
+  final ValueChanged<int> onSelected;
+
+  /// Null draws no heading — for a form that already says what the row is.
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) {
+    final String? label = this.label;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (label != null) ...[
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: kFieldLabelTextSize,
+              color: kHomeSubtitleTextColor,
+            ),
+          ),
+          const SizedBox(height: 8.0),
+        ],
+        Wrap(
+          spacing: kClassSwatchGap,
+          runSpacing: kClassSwatchGap,
+          children: [
+            for (int slot = 0; slot < GB_ClassPalette.length; slot++)
+              _GB_ClassColorSwatch(
+                color: GB_ClassPalette.at(slot),
+                isSelected: slot == selectedSlot,
+                onTap: () => onSelected(slot),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// One swatch: a class tile in miniature, ticked when it is the chosen one.
+class _GB_ClassColorSwatch extends StatelessWidget {
+  const _GB_ClassColorSwatch({
+    required this.color,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final GB_ClassColor color;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      // The pastels are close enough in weight that colour alone is a poor
+      // label, and it is no label at all to a screen reader.
+      label: color.name,
+      button: true,
+      selected: isSelected,
+      child: Tooltip(
+        message: color.name,
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            width: kClassSwatchSize,
+            height: kClassSwatchSize,
+            decoration: BoxDecoration(
+              color: color.fill,
+              shape: BoxShape.circle,
+              // The selected swatch is ringed in the accent rather than its own
+              // border: the tints are pale, and a thicker ring of the same pale
+              // hue does not read as "this one".
+              border: Border.all(
+                color: isSelected ? kHomeAccentColor : color.border,
+                width: isSelected
+                    ? kClassSwatchSelectedBorderWidth
+                    : kClassSwatchBorderWidth,
+              ),
+            ),
+            child: isSelected
+                ? const Icon(
+                    Icons.check,
+                    size: kClassSwatchCheckSize,
+                    color: kHomeAccentColor,
+                  )
+                : null,
+          ),
         ),
       ),
     );

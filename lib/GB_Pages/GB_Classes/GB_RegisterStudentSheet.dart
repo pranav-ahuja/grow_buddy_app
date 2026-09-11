@@ -4,6 +4,7 @@ import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassStore.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentFormFields.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentStore.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:image_picker/image_picker.dart';
@@ -23,8 +24,8 @@ enum _PhotoAction { camera, gallery, remove }
 /// The design draws five of the fields. The form collects more than that —
 /// address, both parents' names and emails, and a guardian block — because a
 /// student record needs them; they are grouped under headings so the extra
-/// length reads as four short forms rather than one long one. Only the four
-/// the design implies are mandatory: name, age, gender, and address.
+/// length reads as four short forms rather than one long one. Mandatory: name,
+/// date of birth, class, gender, and address.
 ///
 /// Call [show]; it returns the registered student, or null if the teacher
 /// backed out, so the caller can react (the dashboard confirms with a snackbar).
@@ -33,9 +34,12 @@ class GB_RegisterStudentSheet extends StatefulWidget {
 
   /// Preselects a class, for when the sheet is opened from inside one. Null
   /// from the dashboard, where no class is in context yet.
-  final int? initialClassId;
+  final String? initialClassId;
 
-  static Future<GB_Student?> show(BuildContext context, {int? initialClassId}) {
+  static Future<GB_Student?> show(
+    BuildContext context, {
+    String? initialClassId,
+  }) {
     return showModalBottomSheet<GB_Student>(
       context: context,
       // The form is taller than the screen and the keyboard covers half of what
@@ -60,7 +64,10 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _ageController = TextEditingController();
+
+  /// Shows [_dateOfBirth] as text. The field is read-only; the date picker is
+  /// the only way to change it, so the text can never be an unparseable date.
+  final TextEditingController _dateOfBirthController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
 
   final TextEditingController _motherNameController = TextEditingController();
@@ -83,9 +90,12 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
   /// is a wrong answer that submits silently, where an empty field asks.
   String? _gender;
 
-  /// Null means "no class yet" — the field is optional, and the teacher can add
-  /// the student to a class later.
-  int? _classId;
+  /// Required: a student is always registered into a class. Null only until
+  /// the teacher picks one, unless the sheet was opened from inside a class.
+  String? _classId;
+
+  /// Null until picked. The age is worked out from it wherever one is shown.
+  DateTime? _dateOfBirth;
 
   String? _photoPath;
 
@@ -108,7 +118,7 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
   void dispose() {
     for (final TextEditingController controller in <TextEditingController>[
       _nameController,
-      _ageController,
+      _dateOfBirthController,
       _addressController,
       _motherNameController,
       _motherMobileController,
@@ -133,16 +143,17 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
     return null;
   }
 
-  /// Ages outside 1-30 are almost certainly a typo rather than a pupil, and
-  /// letting one through would put "Age 202" on the class screen's card.
-  String? _validateAge(String? value) {
-    final String age = (value ?? "").trim();
-    if (age.isEmpty) return "Enter the age";
+  String? _validateDateOfBirth(String? _) {
+    return _dateOfBirth == null ? "Pick the date of birth" : null;
+  }
 
-    final int? parsed = int.tryParse(age);
-    if (parsed == null) return "Use numbers only";
-    if (parsed < 1 || parsed > 30) return "Enter an age between 1 and 30";
-    return null;
+  String? _validateClass(String? classId) {
+    if (classId != null) return null;
+    // An empty dropdown is not something the teacher can fix by looking at it
+    // harder, so say what to do instead.
+    return GB_ClassStore.classes.value.isEmpty
+        ? "Add a class first"
+        : "Choose a class";
   }
 
   /// Optional everywhere it is used, so an empty value passes. A filled one is
@@ -172,6 +183,39 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
   }
 
   // ------------------------------------------------------------------- actions
+
+  /// Opens the calendar on the date already picked, or on a typical preschool
+  /// age when there is none, so the teacher is not starting from today and
+  /// paging back four years.
+  Future<void> _pickDateOfBirth() async {
+    final DateTime today = DateTime.now();
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate:
+          _dateOfBirth ?? DateTime(today.year - 4, today.month, today.day),
+      // Thirty years back matches the widest age the form ever accepted.
+      firstDate: DateTime(today.year - 30),
+      lastDate: today,
+      helpText: "Date of birth",
+    );
+
+    if (picked == null || !mounted) return;
+    setState(() {
+      _dateOfBirth = picked;
+      _dateOfBirthController.text = _formatDate(picked);
+    });
+  }
+
+  static const List<String> _monthNames = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+
+  /// "12 Apr 2021" — day first, and a month name rather than a number, so it
+  /// cannot be misread the way 04/12/2021 can.
+  static String _formatDate(DateTime date) {
+    return "${date.day} ${_monthNames[date.month - 1]} ${date.year}";
+  }
 
   Future<void> _pickPhoto() async {
     final _PhotoAction? action = await showModalBottomSheet<_PhotoAction>(
@@ -264,7 +308,9 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
     return contact.isEmpty ? null : contact;
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_isSubmitting) return;
+
     // Both run before either is checked, so the teacher sees every problem at
     // once rather than fixing the fields and then discovering the gender row.
     final bool fieldsValid = _formKey.currentState?.validate() ?? false;
@@ -275,32 +321,43 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
 
     setState(() => _isSubmitting = true);
 
-    final GB_Student created = GB_StudentStore.addStudent(
-      name: _nameController.text,
-      age: _ageController.text,
-      gender: _gender!,
-      address: _addressController.text,
-      classId: _classId,
-      photoPath: _photoPath,
-      mother: _contactOrNull(
-        name: _motherNameController,
-        mobile: _motherMobileController,
-        email: _motherEmailController,
-      ),
-      father: _contactOrNull(
-        name: _fatherNameController,
-        mobile: _fatherMobileController,
-        email: _fatherEmailController,
-      ),
-      guardian: _contactOrNull(
-        name: _guardianNameController,
-        mobile: _guardianMobileController,
-        address: _guardianAddressController,
-        relation: _guardianRelationController,
-      ),
-    );
+    try {
+      // The server assigns the student id, so it is only known once this
+      // returns — which is why the sheet waits rather than closing at once.
+      final GB_Student created = await GB_StudentStore.addStudent(
+        name: _nameController.text,
+        dateOfBirth: _dateOfBirth!,
+        gender: _gender!,
+        address: _addressController.text,
+        classId: _classId!,
+        photoPath: _photoPath,
+        mother: _contactOrNull(
+          name: _motherNameController,
+          mobile: _motherMobileController,
+          email: _motherEmailController,
+        ),
+        father: _contactOrNull(
+          name: _fatherNameController,
+          mobile: _fatherMobileController,
+          email: _fatherEmailController,
+        ),
+        guardian: _contactOrNull(
+          name: _guardianNameController,
+          mobile: _guardianMobileController,
+          address: _guardianAddressController,
+          relation: _guardianRelationController,
+        ),
+      );
 
-    Navigator.of(context).pop(created);
+      if (!mounted) return;
+      Navigator.of(context).pop(created);
+    } on GB_ApiException catch (error) {
+      if (!mounted) return;
+      // The sheet stays open with everything the teacher typed, so a dropped
+      // connection costs a retry rather than filling in the whole form again.
+      setState(() => _isSubmitting = false);
+      gShowSnack(context, error.message);
+    }
   }
 
   // --------------------------------------------------------------------- build
@@ -435,23 +492,18 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
                   _validateRequired(value, "student's name"),
             ),
             const SizedBox(height: kFieldGap),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: GB_SheetTextField(
-                    controller: _ageController,
-                    label: "Age",
-                    isRequired: true,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: _validateAge,
-                  ),
-                ),
-                const SizedBox(width: kFieldRowGap),
-                Expanded(child: _buildClassField()),
-              ],
+            // Full width rather than paired with the class as the age was: a
+            // date and its label need more room than a two-digit number did.
+            GB_SheetTextField(
+              controller: _dateOfBirthController,
+              label: "Date of Birth",
+              isRequired: true,
+              suffixIcon: Icons.calendar_today_outlined,
+              onTap: _pickDateOfBirth,
+              validator: _validateDateOfBirth,
             ),
+            const SizedBox(height: kFieldGap),
+            _buildClassField(),
             const SizedBox(height: kFieldGap),
             GB_GenderSelector(
               options: _genderOptions,
@@ -594,8 +646,13 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
     return ValueListenableBuilder<List<GB_ClassInfo>>(
       valueListenable: GB_ClassStore.classes,
       builder: (BuildContext context, List<GB_ClassInfo> classes, _) {
-        return DropdownButtonFormField<int?>(
-          value: _classId,
+        return DropdownButtonFormField<String>(
+          // Cleared if the class it named has gone — deleted on another
+          // device, say — rather than left pointing at nothing.
+          value: classes.any((GB_ClassInfo item) => item.id == _classId)
+              ? _classId
+              : null,
+          validator: _validateClass,
           isExpanded: true,
           icon: const Icon(Icons.arrow_drop_down, color: kHomeSubtitleTextColor),
           style: const TextStyle(
@@ -604,7 +661,7 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
             color: kHomeTitleTextColor,
           ),
           decoration: InputDecoration(
-            labelText: "Class/Grade",
+            labelText: "Class/Grade *",
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 16.0,
@@ -623,24 +680,17 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
             enabledBorder: _fieldOutline(kFieldBorderColor),
             focusedBorder: _fieldOutline(kHomeAccentColor),
           ),
-          items: [
-            // The class is optional, so there has to be a way back out of a
-            // choice already made.
-            const DropdownMenuItem<int?>(
-              value: null,
-              child: Text(
-                "Not assigned",
-                style: TextStyle(color: kHomeSubtitleTextColor),
-              ),
-            ),
-            ...classes.map(
-              (GB_ClassInfo classInfo) => DropdownMenuItem<int?>(
-                value: classInfo.id,
-                child: Text(classInfo.name, overflow: TextOverflow.ellipsis),
-              ),
-            ),
-          ],
-          onChanged: (int? value) => setState(() => _classId = value),
+          // No "Not assigned" entry: a student is always registered into a
+          // class.
+          items: classes
+              .map(
+                (GB_ClassInfo classInfo) => DropdownMenuItem<String>(
+                  value: classInfo.id,
+                  child: Text(classInfo.name, overflow: TextOverflow.ellipsis),
+                ),
+              )
+              .toList(),
+          onChanged: (String? value) => setState(() => _classId = value),
         );
       },
     );

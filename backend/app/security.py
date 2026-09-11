@@ -26,10 +26,10 @@ def verify_password(password: str, hashed: str | None) -> bool:
         return False
 
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: str) -> str:
     expires_at = utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
     payload = {
-        "sub": str(user_id),
+        "sub": user_id,
         "exp": expires_at,
         "iat": utcnow(),
     }
@@ -38,15 +38,17 @@ def create_access_token(user_id: int) -> str:
     )
 
 
-def decode_access_token(token: str) -> int | None:
-    """Return the user id carried by the token, or None if it is not valid."""
+def decode_access_token(token: str) -> str | None:
+    """Return the user id (U_000001) carried by the token, or None if it is not
+    valid."""
     try:
         payload = jwt.decode(
             token, settings.resolved_secret_key(), algorithms=[settings.algorithm]
         )
-        return int(payload["sub"])
+        subject = payload["sub"]
     except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):
         return None
+    return subject if isinstance(subject, str) and subject else None
 
 
 def generate_otp() -> str:

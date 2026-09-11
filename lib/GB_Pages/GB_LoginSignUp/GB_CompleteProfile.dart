@@ -8,19 +8,25 @@ import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Common_Functi
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Buttons.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Globals.dart';
+import 'package:intl_phone_field/intl_phone_field.dart';
 
 /// Placeholder the backend assigns to phone sign-ups, which arrive with no real
 /// name. Treated as "no name yet" so the field starts empty rather than asking
 /// the user to delete it.
 const String _kPlaceholderName = "GrowBuddy User";
 
-/// Collects the full name and teacher/student choice that Google and phone
-/// sign-ins can't supply, then `PATCH /me`.
+/// Collects what sign-up couldn't, then `PATCH /me`:
 ///
-/// Reached from `gRouteAfterAuth` whenever `user.needsAccountType` is true.
-/// [isNewUser] only picks the wording — routing here is never decided by it,
-/// because someone who abandons this screen stops being "new" on their next
-/// login while still having no role.
+/// * the full name and teacher/student choice that Google and phone sign-ins
+///   can't supply, and
+/// * whichever of email and mobile number the user did not sign up with —
+///   every user has both, so an email sign-up is asked for a number and a
+///   phone sign-up for an email.
+///
+/// Only what is actually missing is shown. Reached from `gRouteAfterAuth`
+/// whenever `user.needsProfileCompletion` is true. [isNewUser] only picks the
+/// wording — routing here is never decided by it, because someone who abandons
+/// this screen stops being "new" on their next login while still missing it.
 class GB_CompleteProfile extends StatefulWidget {
   const GB_CompleteProfile({super.key, required this.isNewUser});
 
@@ -32,12 +38,23 @@ class GB_CompleteProfile extends StatefulWidget {
 
 class _GB_CompleteProfileState extends State<GB_CompleteProfile> {
   late final TextEditingController _fullNameController;
+  final TextEditingController _emailController = TextEditingController();
 
   String fullName = "";
 
   // Null until the user actually picks one, so nobody is silently registered as
   // a teacher just because that constant happens to be 0.
   int? accountType;
+
+  /// "+919876543210", from the country picker plus the number. Empty until
+  /// typed.
+  String phoneNumber = "";
+
+  // What this user is missing, fixed when the screen opens. Each one decides
+  // whether its section is shown at all.
+  late final bool _needsRole;
+  late final bool _needsEmail;
+  late final bool _needsPhone;
 
   bool isSubmitting = false;
 
@@ -47,11 +64,16 @@ class _GB_CompleteProfileState extends State<GB_CompleteProfile> {
     final String existingName = gCurrentUser?.fullName ?? "";
     fullName = existingName == _kPlaceholderName ? "" : existingName;
     _fullNameController = TextEditingController(text: fullName);
+
+    _needsRole = gCurrentUser?.needsAccountType ?? true;
+    _needsEmail = gCurrentUser?.email == null;
+    _needsPhone = gCurrentUser?.phone == null;
   }
 
   @override
   void dispose() {
     _fullNameController.dispose();
+    _emailController.dispose();
     super.dispose();
   }
 
@@ -101,11 +123,22 @@ class _GB_CompleteProfileState extends State<GB_CompleteProfile> {
   }
 
   Future<void> _save() async {
+    final String email = _emailController.text.trim();
+
     if (fullName.trim().isEmpty) {
       _showSnack("Please enter your full name");
       return;
     }
-    if (accountType == null) {
+    if (_needsEmail &&
+        !RegExp(r"^[^@\s]+@[^@\s]+\.[^@\s]+$").hasMatch(email)) {
+      _showSnack("Please enter a valid email address");
+      return;
+    }
+    if (_needsPhone && phoneNumber.replaceAll(RegExp(r"\D"), "").length < 7) {
+      _showSnack("Please enter your mobile number");
+      return;
+    }
+    if (_needsRole && accountType == null) {
       _showSnack("Please choose whether you're a teacher or a student");
       return;
     }
@@ -118,10 +151,14 @@ class _GB_CompleteProfileState extends State<GB_CompleteProfile> {
 
     setState(() => isSubmitting = true);
     try {
+      // Only what this screen asked for is sent, so a role or contact that is
+      // already set is never overwritten from here.
       final GB_User user = await GB_AuthApi.updateProfile(
         token: token,
         fullName: fullName.trim(),
-        accountType: accountType,
+        accountType: _needsRole ? accountType : null,
+        email: _needsEmail ? email : null,
+        phone: _needsPhone ? phoneNumber : null,
       );
 
       await gUpdateCurrentUser(user);
@@ -230,9 +267,10 @@ class _GB_CompleteProfileState extends State<GB_CompleteProfile> {
                       : "Finish setting up your account",
                   inputTextAlign: TextAlign.center,
                 ),
-                const GB_H2HeadingText(
-                  inputText:
-                      "Tell us your name and how you'll be using Grow Buddy.",
+                GB_H2HeadingText(
+                  inputText: _needsRole
+                      ? "Tell us your name and how you'll be using Grow Buddy."
+                      : "Confirm your name and add your contact details.",
                   inputTextAlign: TextAlign.center,
                 ),
                 GB_buildTextField(
@@ -250,28 +288,61 @@ class _GB_CompleteProfileState extends State<GB_CompleteProfile> {
                   },
                   textFieldKeyboardType: TextInputType.name,
                 ),
-                const Padding(
-                  padding: EdgeInsets.only(top: 10.0, bottom: 10.0),
-                  child: Text(
-                    "I am a...",
-                    textAlign: TextAlign.center,
-                    style: kH2TextStyle,
+                if (_needsEmail)
+                  GB_buildTextField(
+                    controller: _emailController,
+                    suffixIcon: Icons.cancel_outlined,
+                    iconAction: () => setState(_emailController.clear),
+                    textFieldLabel: "Email Address",
+                    textFieldOnChanged: (_) {},
+                    textFieldKeyboardType: TextInputType.emailAddress,
                   ),
-                ),
-                Row(
-                  children: [
-                    _accountTypeOption(
-                      label: "Teacher",
-                      icon: Icons.school_outlined,
-                      value: accountTypeTeacher,
+                if (_needsPhone)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10.0),
+                    // The same picker as phone login, so the number is saved
+                    // in the form OTP login looks it up by — "+919876543210".
+                    // A bare "9876543210" here would make logging in by phone
+                    // create a second account.
+                    child: IntlPhoneField(
+                      decoration: InputDecoration(
+                        label: const Text("Mobile Number"),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(50.0),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(50.0),
+                          borderSide: const BorderSide(color: kPrimaryColor1),
+                        ),
+                      ),
+                      initialCountryCode: 'IN',
+                      onChanged: (value) => phoneNumber = value.completeNumber,
                     ),
-                    _accountTypeOption(
-                      label: "Student",
-                      icon: Icons.backpack_outlined,
-                      value: accountTypeStudent,
+                  ),
+                if (_needsRole) ...[
+                  const Padding(
+                    padding: EdgeInsets.only(top: 10.0, bottom: 10.0),
+                    child: Text(
+                      "I am a...",
+                      textAlign: TextAlign.center,
+                      style: kH2TextStyle,
                     ),
-                  ],
-                ),
+                  ),
+                  Row(
+                    children: [
+                      _accountTypeOption(
+                        label: "Teacher",
+                        icon: Icons.school_outlined,
+                        value: accountTypeTeacher,
+                      ),
+                      _accountTypeOption(
+                        label: "Student",
+                        icon: Icons.backpack_outlined,
+                        value: accountTypeStudent,
+                      ),
+                    ],
+                  ),
+                ],
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 30.0),
                   child: Center(

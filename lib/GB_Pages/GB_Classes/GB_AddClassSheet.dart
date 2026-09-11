@@ -5,7 +5,9 @@ import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassArchive.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassArchiveFile.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassStore.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassWidgets.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentStore.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Buttons.dart';
 
@@ -49,6 +51,13 @@ class GB_AddClassSheet extends StatefulWidget {
 class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
   final TextEditingController _nameController = TextEditingController();
 
+  /// The palette slot the teacher picked for this class.
+  ///
+  /// Starts on the colour the class would have been given anyway, so the picker
+  /// is an override rather than another field that has to be filled in before
+  /// the form can be submitted.
+  int _colorSlot = GB_ClassStore.nextColorSlot;
+
   /// Shown under the field. Null while the input is acceptable.
   String? _error;
 
@@ -61,6 +70,10 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
 
   /// True while the file picker is open, so the upload cannot be started twice.
   bool _isReadingFile = false;
+
+  /// True while the class is being sent to the server, so a second tap on a
+  /// slow connection cannot create it twice.
+  bool _isSaving = false;
 
   @override
   void dispose() {
@@ -109,7 +122,8 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
     });
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_isSaving) return;
     final String name = _nameController.text.trim();
 
     if (name.isEmpty) {
@@ -119,22 +133,44 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
 
     // Checked rather than allowed-and-deduplicated later: two classes with the
     // same name are indistinguishable in the dashboard list, so the teacher
-    // would have no way to tell which tile is which.
+    // would have no way to tell which tile is which. The server checks too —
+    // this only catches the names already on screen without a round trip.
     if (GB_ClassStore.nameExists(name)) {
       setState(() => _error = "A class called \"$name\" already exists");
       return;
     }
 
-    final GB_ClassInfo created = GB_ClassStore.addClass(name: name);
-
-    // The students go in against the new class's id, so a restored class is
-    // indistinguishable from one that was never deleted.
+    setState(() => _isSaving = true);
     final GB_ClassArchiveData? archive = _archive;
-    if (archive != null && archive.students.isNotEmpty) {
-      GB_StudentStore.restoreStudents(archive.students, classId: created.id);
-    }
 
-    Navigator.of(context).pop(created);
+    try {
+      // A restore sends the file's students with the class, so the server
+      // creates them together. They keep their original student ids, and the
+      // restored class is indistinguishable from one that was never deleted.
+      final GB_ClassInfo created = await GB_ClassStore.addClass(
+        name: name,
+        colorSlot: _colorSlot,
+        students: archive?.students ?? const [],
+      );
+
+      // The restored students exist on the server now but not in this
+      // device's copy, and the dashboard's confirmation counts them from it.
+      if (archive != null && archive.students.isNotEmpty) {
+        await GB_StudentStore.load();
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pop(created);
+    } on GB_ApiException catch (error) {
+      if (!mounted) return;
+      // Shown under the name field: the likeliest refusal is a duplicate name
+      // added from another device since this one last loaded, and that is the
+      // field the teacher has to change.
+      setState(() {
+        _error = error.message;
+        _isSaving = false;
+      });
+    }
   }
 
   @override
@@ -148,7 +184,9 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
-      child: Padding(
+      // The swatch row made the sheet tall enough to run past a short screen
+      // once the keyboard is up, so it scrolls rather than overflows.
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20.0, 12.0, 20.0, 24.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -211,6 +249,11 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
               ),
             ),
             const SizedBox(height: 20.0),
+            GB_ClassColorPicker(
+              selectedSlot: _colorSlot,
+              onSelected: (int slot) => setState(() => _colorSlot = slot),
+            ),
+            const SizedBox(height: 20.0),
             if (archive == null) _buildUploadPrompt() else _buildArchiveSummary(archive),
             const SizedBox(height: 24.0),
             // GB_ElevatedButtonString sizes itself from its text plus a
@@ -222,13 +265,16 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
                 screenWidth: screenWidth,
                 horizontalPadding: 0.0,
                 verticalPadding: kElevatedButtonVerticalPadding,
-                elevatedButtonText:
-                    archive == null ? "Add class" : "Restore class",
+                elevatedButtonText: _isSaving
+                    ? "Saving…"
+                    : archive == null
+                        ? "Add class"
+                        : "Restore class",
                 buttonColor: kHomeAccentColor,
                 elevatedButtonTextColor: kPrimaryColor2,
                 elevatedButtonFontWeight: FontWeight.w500,
                 elevatedButtonTextSize: kElevatedButtonTextSize,
-                onPressed: _submit,
+                onPressed: _isSaving ? null : _submit,
               ),
             ),
           ],

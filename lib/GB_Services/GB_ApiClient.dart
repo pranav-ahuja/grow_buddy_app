@@ -73,6 +73,33 @@ class GB_ApiClient {
     );
   }
 
+  /// A GET whose body is a JSON array — the list endpoints, e.g. `/classes`.
+  ///
+  /// [_decodeBody] wraps a top-level array as `{"data": [...]}` so that every
+  /// response can travel as a map; this unwraps it again.
+  static Future<List<Map<String, dynamic>>> getJsonList(
+    String url, {
+    String? token,
+  }) async {
+    final Map<String, dynamic> decoded = await getJson(url, token: token);
+    final dynamic items = decoded["data"];
+    if (items is! List) {
+      throw GB_ApiException("The server sent back something unexpected.");
+    }
+    return items.cast<Map<String, dynamic>>();
+  }
+
+  /// A DELETE. The backend answers these with 204 and no body, so there is
+  /// nothing to return — success is simply not throwing.
+  static Future<void> delete(
+    String url, {
+    String? token,
+  }) async {
+    await _send(
+      () => client.delete(Uri.parse(url), headers: _headers(token: token)),
+    );
+  }
+
   static Future<Map<String, dynamic>> _send(
     Future<http.Response> Function() request,
   ) async {

@@ -146,3 +146,55 @@ def test_otp_rejects_a_malformed_phone_number(client):
     response = client.post(OTP_REQUEST, json={"phone": "not-a-number"})
 
     assert response.status_code == 422
+
+
+# --- Every user has both an email and a phone number ------------------------
+
+
+def _auth(response) -> dict[str, str]:
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def test_an_email_signup_is_asked_for_a_phone_number(client):
+    created = client.post(SIGNUP, json=TEACHER)
+    assert created.json()["user"]["needs_contact_details"] is True
+
+    updated = client.patch(ME, json={"phone": "+91 98765-43210"}, headers=_auth(created))
+
+    assert updated.status_code == 200
+    assert updated.json()["phone"] == "+919876543210"
+    assert updated.json()["needs_contact_details"] is False
+    # Typed into a form, not proven by a code.
+    assert updated.json()["is_phone_verified"] is False
+
+
+def test_a_phone_signup_is_asked_for_an_email(client):
+    code = client.post(OTP_REQUEST, json={"phone": "+919000000050"}).json()["debug_otp"]
+    created = client.post(OTP_VERIFY, json={"phone": "+919000000050", "otp": code})
+    assert created.json()["user"]["needs_contact_details"] is True
+
+    updated = client.patch(ME, json={"email": "Asha@Example.com"}, headers=_auth(created))
+
+    assert updated.json()["email"] == "asha@example.com"
+    assert updated.json()["needs_contact_details"] is False
+
+
+def test_a_contact_already_on_another_account_is_refused(client):
+    client.post(SIGNUP, json={**TEACHER, "identifier": "+919000000051"})
+    other = client.post(SIGNUP, json={**TEACHER, "identifier": "other@example.com"})
+
+    response = client.patch(ME, json={"phone": "+919000000051"}, headers=_auth(other))
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "That phone number is already used by another account"
+
+
+def test_a_user_can_sign_in_with_either(client):
+    created = client.post(SIGNUP, json=TEACHER)
+    client.patch(ME, json={"phone": "+919000000052"}, headers=_auth(created))
+
+    by_email = client.post(LOGIN, json={"email": "pranav@example.com", "password": "supersecret123"})
+    by_phone = client.post(LOGIN, json={"email": "+919000000052", "password": "supersecret123"})
+
+    assert by_email.status_code == by_phone.status_code == 200
+    assert by_email.json()["user"]["user_id"] == by_phone.json()["user"]["user_id"]

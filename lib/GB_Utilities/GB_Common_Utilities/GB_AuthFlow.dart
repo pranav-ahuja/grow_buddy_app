@@ -14,13 +14,15 @@ import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Globals.dart'
 /// Google sign-in. Every auth screen funnels through here so the rule lives in
 /// one place instead of being restated four times.
 ///
-/// The rule: `needsAccountType` sends the user to [GB_CompleteProfile],
-/// everything else goes to [GB_Dashboard].
+/// The rule: `needsProfileCompletion` — no role yet, or no email or no phone
+/// number — sends the user to [GB_CompleteProfile], everything else goes to
+/// [GB_Dashboard]. Every user has both an email and a phone number; whichever
+/// they did not sign up with is asked for there.
 ///
-/// Deliberately keyed on `needsAccountType` rather than `isNewUser`. Someone
+/// Deliberately keyed on what is missing rather than on `isNewUser`. Someone
 /// who abandons the profile screen is no longer "new" the next time they log
-/// in, but still has no role — routing on `isNewUser` would strand them with a
-/// permanently incomplete profile. `isNewUser` only picks the wording.
+/// in, but is still missing it — routing on `isNewUser` would strand them with
+/// a permanently incomplete profile. `isNewUser` only picks the wording.
 void gRouteAfterAuth(BuildContext context, GB_AuthResult result) {
   // Not awaited: `gSetSession` fills the globals synchronously and only the
   // disk write is async, so there is nothing for the navigation below to wait
@@ -33,7 +35,7 @@ void gRouteAfterAuth(BuildContext context, GB_AuthResult result) {
   Navigator.pushAndRemoveUntil(
     context,
     MaterialPageRoute(
-      builder: (context) => result.user.needsAccountType
+      builder: (context) => result.user.needsProfileCompletion
           ? GB_CompleteProfile(isNewUser: result.isNewUser)
           : const GB_Dashboard(),
     ),
@@ -99,7 +101,7 @@ Future<void> gSignInWithGoogle(BuildContext context) async {
     debugPrint(
       "[gSignInWithGoogle] backend accepted it: user=${result.user.fullName} "
       "isNewUser=${result.isNewUser} "
-      "needsAccountType=${result.user.needsAccountType}",
+      "needsProfileCompletion=${result.user.needsProfileCompletion}",
     );
 
     if (!context.mounted) return;

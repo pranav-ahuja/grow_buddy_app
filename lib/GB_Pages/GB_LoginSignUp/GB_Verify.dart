@@ -81,6 +81,21 @@ class _GB_VerifyState extends State<GB_Verify> {
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
 
+    // Pinput's own default cell, restated so the digits can be made larger.
+    final PinTheme defaultPinTheme = PinTheme(
+      width: 56.0,
+      height: 60.0,
+      textStyle: TextStyle(
+        fontSize: kOtpDigitTextSize,
+        color: kTextColor,
+        fontWeight: FontWeight.w500,
+      ),
+      decoration: BoxDecoration(
+        color: const Color.fromRGBO(222, 231, 240, .57),
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+    );
+
     return Scaffold(
       appBar: AppBar(
         title: GB_AppBarText(
@@ -110,6 +125,7 @@ class _GB_VerifyState extends State<GB_Verify> {
                     Pinput(
                       controller: _otpController,
                       length: 6,
+                      defaultPinTheme: defaultPinTheme,
                       onCompleted: (_) => _confirmOtp(),
                     ),
                     Text(

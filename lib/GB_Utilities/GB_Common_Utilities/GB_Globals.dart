@@ -1,3 +1,6 @@
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassStore.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentStore.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
 import 'package:grow_buddy_app/GB_Services/GB_AuthApi.dart';
 import 'package:grow_buddy_app/GB_Services/GB_SessionStore.dart';
 
@@ -9,6 +12,19 @@ String? gLoginToken;
 
 /// The signed-in user, populated alongside [gLoginToken].
 GB_User? gCurrentUser;
+
+/// [gLoginToken], for a call that is meaningless signed out — every request
+/// for the teacher's own classes and students.
+///
+/// Throws the same exception the network layer does, so callers already
+/// catching [GB_ApiException] show this like any other failure.
+String gRequireToken() {
+  final String? token = gLoginToken;
+  if (token == null) {
+    throw GB_ApiException("You've been signed out. Please log in again.");
+  }
+  return token;
+}
 
 /// Sets the session and writes it to disk.
 ///
@@ -34,8 +50,16 @@ Future<void> gUpdateCurrentUser(GB_User user) async {
   await GB_SessionStore.saveUser(user);
 }
 
+/// Ends the session on this device.
+///
+/// Also empties the class and student stores. They are a copy of one
+/// account's data, and without this, the next person to sign in on the same
+/// device would see the previous teacher's classes until the first load
+/// replaced them.
 Future<void> gClearSession() async {
   gLoginToken = null;
   gCurrentUser = null;
+  GB_ClassStore.clear();
+  GB_StudentStore.clear();
   await GB_SessionStore.clear();
 }

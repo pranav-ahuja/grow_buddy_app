@@ -3,7 +3,8 @@ import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 
 class GB_User {
-  final int id;
+  /// The server's user id, e.g. "U_000001".
+  final String userId;
   final String fullName;
   final String? email;
   final String? phone;
@@ -14,31 +15,46 @@ class GB_User {
   final String? role;
 
   /// True while [accountType] is null — send the user to the "Who are you?"
-  /// screen, then call [GB_AuthApi.setAccountType].
+  /// screen, then call [GB_AuthApi.updateProfile].
   final bool needsAccountType;
+
+  /// True while [email] or [phone] is missing. Every user has both: signing up
+  /// with one, the profile screen asks for the other.
+  final bool needsContactDetails;
 
   final bool isPhoneVerified;
 
   GB_User({
-    required this.id,
+    required this.userId,
     required this.fullName,
     required this.email,
     required this.phone,
     required this.accountType,
     required this.role,
     required this.needsAccountType,
+    required this.needsContactDetails,
     required this.isPhoneVerified,
   });
 
+  /// Whether sign-in should detour through the profile screen before the
+  /// dashboard — for a missing role or a missing email or phone number.
+  bool get needsProfileCompletion => needsAccountType || needsContactDetails;
+
   factory GB_User.fromJson(Map<String, dynamic> json) {
+    final String? email = json["email"] as String?;
+    final String? phone = json["phone"] as String?;
     return GB_User(
-      id: json["id"] as int,
+      userId: json["user_id"] as String,
       fullName: json["full_name"] as String,
-      email: json["email"] as String?,
-      phone: json["phone"] as String?,
+      email: email,
+      phone: phone,
       accountType: json["account_type"] as int?,
       role: json["role"] as String?,
       needsAccountType: json["needs_account_type"] as bool? ?? false,
+      // Worked out locally when absent, so a session cached before this field
+      // existed still gets asked for the missing contact.
+      needsContactDetails:
+          json["needs_contact_details"] as bool? ?? (email == null || phone == null),
       isPhoneVerified: json["is_phone_verified"] as bool? ?? false,
     );
   }
@@ -47,13 +63,14 @@ class GB_User {
   /// what this writes — the cached copy and an API response are the same shape.
   Map<String, dynamic> toJson() {
     return {
-      "id": id,
+      "user_id": userId,
       "full_name": fullName,
       "email": email,
       "phone": phone,
       "account_type": accountType,
       "role": role,
       "needs_account_type": needsAccountType,
+      "needs_contact_details": needsContactDetails,
       "is_phone_verified": isPhoneVerified,
     };
   }
@@ -178,20 +195,27 @@ class GB_AuthApi {
     return GB_AuthResult.fromJson(json);
   }
 
-  /// Completes a profile after a Google or phone sign-up.
+  /// Completes a profile after sign-up: a name and role after Google or phone
+  /// sign-in, and whichever of [email] and [phone] the user did not sign up
+  /// with.
   ///
-  /// Pass whichever fields the sign-up screen collected; omitted fields are
-  /// left untouched. The backend rejects a call that changes nothing.
+  /// Pass whichever fields the profile screen collected; omitted fields are
+  /// left untouched. The backend rejects a call that changes nothing, and
+  /// answers 409 when the email or phone already belongs to another account.
   static Future<GB_User> updateProfile({
     required String token,
     String? fullName,
     int? accountType,
+    String? email,
+    String? phone,
   }) async {
     final json = await GB_ApiClient.patchJson(
       kMeUrl,
       {
         if (fullName != null) "full_name": fullName,
         if (accountType != null) "account_type": accountType,
+        if (email != null) "email": email,
+        if (phone != null) "phone": phone,
       },
       token: token,
     );

@@ -5,9 +5,10 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.accounts import apply_role, new_user
 from app.config import settings
 from app.deps import CurrentUser, DbSession
-from app.models import OtpCode, User
+from app.models import ACCOUNT_TYPE_TO_ROLE, OtpCode, User
 from app.google_auth import GoogleAuthError, GoogleProfile, verify_google_id_token
 from app.schemas import (
     GoogleLoginRequest,
@@ -58,7 +59,9 @@ def _sync_google_profile(db: Session, user: User, profile: GoogleProfile) -> Non
         # moved here. Rare (mostly reassigned Workspace addresses), and never a
         # reason to block a sign-in: google_id still identifies them correctly.
         taken_by = db.scalar(
-            select(User).where(User.email == profile.email, User.id != user.id)
+            select(User).where(
+                User.email == profile.email, User.user_id != user.user_id
+            )
         )
         if taken_by is None:
             user.email = profile.email
@@ -68,8 +71,8 @@ def _sync_google_profile(db: Session, user: User, profile: GoogleProfile) -> Non
                 "Keeping the existing address on user %s.",
                 user.google_id,
                 profile.email,
-                taken_by.id,
-                user.id,
+                taken_by.user_id,
+                user.user_id,
             )
 
     # Only fill in a name we never really had. Overwriting one the user chose in
@@ -80,7 +83,7 @@ def _sync_google_profile(db: Session, user: User, profile: GoogleProfile) -> Non
 
 def _token_response(user: User, *, is_new_user: bool = False) -> TokenResponse:
     return TokenResponse(
-        access_token=create_access_token(user.id),
+        access_token=create_access_token(user.user_id),
         user=UserOut.model_validate(user),
         is_new_user=is_new_user,
     )
@@ -115,14 +118,14 @@ def signup(payload: SignUpRequest, db: DbSession) -> TokenResponse:
             detail="An account with those details already exists",
         )
 
-    user = User(
+    user = new_user(
+        db,
         full_name=payload.full_name,
         email=email,
         phone=phone,
-        hashed_password=hash_password(payload.password),
-        account_type=payload.account_type,
+        password_hash=hash_password(payload.password),
     )
-    db.add(user)
+    apply_role(db, user, ACCOUNT_TYPE_TO_ROLE[payload.account_type])
     db.commit()
     db.refresh(user)
 
@@ -140,7 +143,7 @@ def login(payload: LoginRequest, db: DbSession) -> TokenResponse:
 
     # One message for "no such user" and "wrong password" alike, so the endpoint
     # cannot be used to discover which emails are registered.
-    if user is None or not verify_password(payload.password, user.hashed_password):
+    if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -240,13 +243,13 @@ def verify_otp_code(payload: OtpVerifyRequest, db: DbSession) -> TokenResponse:
     if user is None:
         # Phone login doubles as sign-up: first successful OTP creates the
         # account. Name is optional here because the OTP screen never asks, and
-        # account_type stays null until the user picks teacher or student.
-        user = User(
+        # the role stays null until the user picks teacher or student.
+        user = new_user(
+            db,
             full_name=(payload.full_name or "").strip() or PLACEHOLDER_FULL_NAME,
             phone=payload.phone,
             is_phone_verified=True,
         )
-        db.add(user)
     else:
         user.is_phone_verified = True
 
@@ -326,12 +329,12 @@ def google_login(payload: GoogleLoginRequest, db: DbSession) -> TokenResponse:
                 )
 
         is_new_user = True
-        user = User(
+        user = new_user(
+            db,
             full_name=profile.full_name or PLACEHOLDER_FULL_NAME,
             email=trusted_email,
             google_id=profile.google_id,
         )
-        db.add(user)
 
     db.commit()
     db.refresh(user)
@@ -348,16 +351,43 @@ def me(current_user: CurrentUser) -> User:
 def update_profile(
     payload: ProfileUpdateRequest, current_user: CurrentUser, db: DbSession
 ) -> User:
-    """Complete a profile after a Google or phone sign-up.
+    """Complete a profile after sign-up.
 
-    This is what the sign-up screen calls once a new user has entered their name
-    and picked teacher or student. Fields left out are left alone.
+    What the profile screen calls once the user has entered what sign-up could
+    not collect: a name and teacher/student after Google or phone sign-in, and
+    the email or phone number they did not sign up with. Fields left out are
+    left alone.
     """
+    if payload.email is not None and payload.email != current_user.email:
+        _reject_taken(db, User.email == payload.email, current_user, "email address")
+        current_user.email = payload.email
+
+    if payload.phone is not None and payload.phone != current_user.phone:
+        _reject_taken(db, User.phone == payload.phone, current_user, "phone number")
+        current_user.phone = payload.phone
+        # A number typed into a form proves nothing about who holds the phone.
+        # Only the OTP flow sets this true.
+        current_user.is_phone_verified = False
+
     if payload.full_name is not None:
         current_user.full_name = payload.full_name
     if payload.account_type is not None:
-        current_user.account_type = payload.account_type
+        apply_role(db, current_user, ACCOUNT_TYPE_TO_ROLE[payload.account_type])
 
     db.commit()
     db.refresh(current_user)
     return current_user
+
+
+def _reject_taken(db: Session, clause, current_user: User, what: str) -> None:
+    """409 when another account already holds this email or phone.
+
+    Both columns are unique, so letting the write through would fail anyway —
+    this turns that into a message the profile screen can show.
+    """
+    holder = db.scalar(select(User).where(clause, User.user_id != current_user.user_id))
+    if holder is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"That {what} is already used by another account",
+        )

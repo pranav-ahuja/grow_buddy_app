@@ -60,7 +60,7 @@ def test_second_google_login_reuses_the_same_account(client, fake_google):
     second = client.post(GOOGLE, json={"id_token": "tok"}).json()
 
     assert second["is_new_user"] is False
-    assert second["user"]["id"] == first["user"]["id"]
+    assert second["user"]["user_id"] == first["user"]["user_id"]
 
 
 def test_google_login_matches_on_sub_even_if_the_email_changed(client, fake_google):
@@ -71,7 +71,7 @@ def test_google_login_matches_on_sub_even_if_the_email_changed(client, fake_goog
     fake_google("tok2", email="pranav.new@gmail.com")
     second = client.post(GOOGLE, json={"id_token": "tok2"}).json()
 
-    assert second["user"]["id"] == first["user"]["id"]
+    assert second["user"]["user_id"] == first["user"]["user_id"]
     assert second["is_new_user"] is False
 
 
@@ -90,7 +90,7 @@ def test_google_login_links_to_an_existing_password_account(client, fake_google)
     response = client.post(GOOGLE, json={"id_token": "tok"}).json()
 
     # Same account, not a duplicate — and the teacher role is preserved.
-    assert response["user"]["id"] == created["user"]["id"]
+    assert response["user"]["user_id"] == created["user"]["user_id"]
     assert response["is_new_user"] is False
     assert response["user"]["role"] == "teacher"
     assert response["user"]["needs_account_type"] is False
@@ -114,7 +114,7 @@ def test_google_login_will_not_take_over_an_account_via_unverified_email(
     fake_google("tok", email="pranav@gmail.com", email_verified=False)
     response = client.post(GOOGLE, json={"id_token": "tok"})
 
-    assert created["user"]["id"]
+    assert created["user"]["user_id"]
     assert response.status_code == 409
     assert "password" in response.json()["detail"]
 
@@ -219,7 +219,7 @@ def test_returning_login_updates_a_changed_email(client, fake_google):
     fake_google("tok2", email="pranav.new@gmail.com")
     second = client.post(GOOGLE, json={"id_token": "tok2"}).json()
 
-    assert second["user"]["id"] == first["user"]["id"]
+    assert second["user"]["user_id"] == first["user"]["user_id"]
     assert second["user"]["email"] == "pranav.new@gmail.com"
 
 
@@ -244,7 +244,7 @@ def test_returning_login_keeps_old_email_when_the_new_one_is_taken(
     second = client.post(GOOGLE, json={"id_token": "tok2"})
 
     assert second.status_code == 200, second.text
-    assert second.json()["user"]["id"] == first["user"]["id"]
+    assert second.json()["user"]["user_id"] == first["user"]["user_id"]
     assert second.json()["user"]["email"] == "pranav@gmail.com"
 
 

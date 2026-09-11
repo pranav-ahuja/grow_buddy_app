@@ -14,14 +14,16 @@ import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentStore.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeAppBar.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeWidgets.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 
 /// The teacher's home screen: an events carousel, the class list, a "register
 /// new student" action, and the four-tab bottom bar.
 ///
-/// The classes come from [GB_ClassStore], so the list reflects anything the
-/// teacher adds. Events are still placeholder data — [_events] is the seam to
+/// The classes and students come from the server, through [GB_ClassStore] and
+/// [GB_StudentStore], so every device signed in to the same account shows the
+/// same list. Events are still placeholder data — [_events] is the seam to
 /// replace when the backend grows an events endpoint.
 class GB_TeacherDashboard extends StatefulWidget {
   const GB_TeacherDashboard({super.key});
@@ -30,13 +32,68 @@ class GB_TeacherDashboard extends StatefulWidget {
   State<GB_TeacherDashboard> createState() => _GB_TeacherDashboardState();
 }
 
-class _GB_TeacherDashboardState extends State<GB_TeacherDashboard> {
+class _GB_TeacherDashboardState extends State<GB_TeacherDashboard>
+    with WidgetsBindingObserver {
   /// Which bottom-nav tab is selected. Only Home has a screen so far; the other
   /// three announce themselves and leave the index where it was.
   int _selectedTab = 0;
 
   /// Which carousel card the indicator should highlight.
   int _activeEvent = 0;
+
+  /// True until the first load has come back, so an account's classes are
+  /// not briefly drawn as "no classes" while they are still on their way.
+  bool _isFirstLoad = true;
+
+  /// Set when a load failed and there is nothing on screen to fall back on.
+  String? _loadError;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Reloads when the app comes back to the foreground.
+  ///
+  /// This is what makes a class added on another device turn up without the
+  /// teacher having to know to pull down: switching back to this app is the
+  /// moment they are about to look at the list.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  /// Fetches the classes and students from the server.
+  ///
+  /// Both together, since the tiles need both — a class list without its
+  /// students would show every class as "0 students" for a moment.
+  Future<void> _refresh() async {
+    try {
+      await Future.wait([GB_ClassStore.load(), GB_StudentStore.load()]);
+      if (!mounted) return;
+      setState(() {
+        _isFirstLoad = false;
+        _loadError = null;
+      });
+    } on GB_ApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isFirstLoad = false;
+        // With classes already on screen, a failed refresh is a passing
+        // remark; with nothing on screen, it is the whole story.
+        if (GB_ClassStore.classes.value.isEmpty) _loadError = error.message;
+      });
+      gShowSnack(context, error.message);
+    }
+  }
 
   static const List<GB_Event> _events = [
     GB_Event(
@@ -124,20 +181,28 @@ class _GB_TeacherDashboardState extends State<GB_TeacherDashboard> {
       return;
     }
 
-    GB_StudentStore.removeStudentsInClass(classInfo.id);
-    GB_ClassStore.removeClass(classInfo.id);
+    try {
+      // The server deletes the students with the class; the local prune only
+      // brings this device's copy into line.
+      await GB_ClassStore.removeClass(classInfo.id);
+      GB_StudentStore.removeStudentsInClass(classInfo.id);
+    } on GB_ApiException catch (error) {
+      if (!mounted) return;
+      // The class file was written, but the class still exists — saying it was
+      // deleted would be the lie. The file is harmless to keep.
+      gShowSnack(context, "${classInfo.name} was not deleted — ${error.message}");
+      return;
+    }
 
+    if (!mounted) return;
     gShowSnack(context, "${classInfo.name} deleted — class file saved");
   }
 
-  /// The caption under a class name.
-  ///
-  /// Keeps the design's "no. of students" placeholder while a class is empty —
-  /// "0 students" reads as a failure, where the placeholder reads as a column
-  /// heading waiting to be filled.
-  String? _studentCountLabel(int classId) {
+  /// The caption under a class name: always the real count, never the design's
+  /// "no. of students" placeholder. An empty class reads "0 students" rather
+  /// than falling back to the wording on [GB_ClassInfo.subtitle].
+  String _studentCountLabel(String classId) {
     final int count = GB_StudentStore.countInClass(classId);
-    if (count == 0) return null;
     return count == 1 ? "1 student" : "$count students";
   }
 
@@ -149,24 +214,21 @@ class _GB_TeacherDashboardState extends State<GB_TeacherDashboard> {
     if (created == null || !mounted) return;
 
     // The design's third screen is "Student added to the class", so the
-    // confirmation names the class when there is one — a student registered
-    // without a class has not been added to anything, and saying so would be
-    // untrue.
-    final String? className = created.classId == null
-        ? null
-        : GB_ClassStore.classes.value
+    // confirmation names the class. Every student has one now; the fallback
+    // only covers a class deleted from another device in the meantime.
+    final String className = GB_ClassStore.classes.value
             .where((GB_ClassInfo item) => item.id == created.classId)
             .map((GB_ClassInfo item) => item.name)
-            .firstOrNull;
+            .firstOrNull ??
+        "their class";
 
-    // The id is named here because registration is the only place it is
-    // announced — everywhere else the teacher has to already know which student
-    // card to go and look at.
+    // The id and roll number are named here because registration is the only
+    // place they are announced — everywhere else the teacher has to already
+    // know which student card to go and look at.
     gShowSnack(
       context,
-      className == null
-          ? "${created.name} registered as ${created.studentId}"
-          : "${created.name} added to $className as ${created.studentId}",
+      "${created.name} added to $className as ${created.studentId}"
+      "${created.rollNumber == null ? "" : ", roll no. ${created.rollNumber}"}",
     );
   }
 
@@ -188,82 +250,103 @@ class _GB_TeacherDashboardState extends State<GB_TeacherDashboard> {
       backgroundColor: kPrimaryColor2,
       appBar: const GB_HomeAppBar(),
       body: SafeArea(
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: Column(
-                // The gaps reproduce the design's vertical rhythm on its 360x800
-                // frame: the bar ends at y=88, the dots sit at y=372, the
-                // heading at y=412, and the class list starts at y=464.
-                children: [
-                  const SizedBox(height: 16.0),
-                  _buildEventsCarousel(),
-                  const SizedBox(height: 24.0),
-                  GB_CarouselIndicator(
-                    count: _events.length,
-                    activeIndex: _activeEvent,
-                  ),
-                  const SizedBox(height: 32.0),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: kHomeHorizontalPadding,
+        // Pull-to-refresh, for when the teacher knows they just changed
+        // something on another device and does not want to wait.
+        child: RefreshIndicator(
+          onRefresh: _refresh,
+          color: kHomeAccentColor,
+          child: CustomScrollView(
+            // Always scrollable, or a list too short to scroll could never be
+            // pulled down to refresh.
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverToBoxAdapter(
+                child: Column(
+                  // The gaps reproduce the design's vertical rhythm on its 360x800
+                  // frame: the bar ends at y=88, the dots sit at y=372, the
+                  // heading at y=412, and the class list starts at y=464.
+                  children: [
+                    const SizedBox(height: 16.0),
+                    _buildEventsCarousel(),
+                    const SizedBox(height: 24.0),
+                    GB_CarouselIndicator(
+                      count: _events.length,
+                      activeIndex: _activeEvent,
                     ),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: GB_HomeSectionHeader(
-                        title: "Your classes at a glance!",
+                    const SizedBox(height: 32.0),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: kHomeHorizontalPadding,
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: GB_HomeSectionHeader(
+                          title: "Your classes at a glance!",
+                        ),
                       ),
                     ),
+                    const SizedBox(height: 24.0),
+                  ],
+                ),
+              ),
+              // A sliver list rather than a Column of tiles: the class list is the
+              // only part that grows with the data, so it is what should scroll
+              // lazily under the fixed carousel above it.
+              //
+              // Wrapped in a ValueListenableBuilder so adding a class repaints
+              // the list without this screen holding a copy that could drift out
+              // of step with the store.
+              if (_isFirstLoad)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24.0),
+                    child: Center(
+                      child: CircularProgressIndicator(color: kHomeAccentColor),
+                    ),
                   ),
-                  const SizedBox(height: 24.0),
-                ],
-              ),
-            ),
-            // A sliver list rather than a Column of tiles: the class list is the
-            // only part that grows with the data, so it is what should scroll
-            // lazily under the fixed carousel above it.
-            //
-            // Wrapped in a ValueListenableBuilder so adding a class repaints
-            // the list without this screen holding a copy that could drift out
-            // of step with the store.
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: kHomeHorizontalPadding,
-              ),
-              sliver: ValueListenableBuilder<List<GB_ClassInfo>>(
-                valueListenable: GB_ClassStore.classes,
-                builder: (context, classes, _) {
-                  // Nested on the students too, so registering one updates the
-                  // count under its class name without this screen recomputing
-                  // anything itself.
-                  return ValueListenableBuilder<List<GB_Student>>(
-                    valueListenable: GB_StudentStore.students,
-                    builder: (context, _, __) {
-                      return SliverList.builder(
-                        // One past the classes for the "Add a class" tile that
-                        // closes the list.
-                        itemCount: classes.length + 1,
-                        itemBuilder: (context, index) {
-                          if (index == classes.length) {
-                            return GB_AddClassTile(onTap: _addClass);
-                          }
+                )
+              else if (_loadError != null)
+                SliverToBoxAdapter(child: _buildLoadError(_loadError!))
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: kHomeHorizontalPadding,
+                  ),
+                  sliver: ValueListenableBuilder<List<GB_ClassInfo>>(
+                    valueListenable: GB_ClassStore.classes,
+                    builder: (context, classes, _) {
+                      // Nested on the students too, so registering one updates the
+                      // count under its class name without this screen recomputing
+                      // anything itself.
+                      return ValueListenableBuilder<List<GB_Student>>(
+                        valueListenable: GB_StudentStore.students,
+                        builder: (context, _, __) {
+                          return SliverList.builder(
+                            // One past the classes for the "Add a class" tile that
+                            // closes the list.
+                            itemCount: classes.length + 1,
+                            itemBuilder: (context, index) {
+                              if (index == classes.length) {
+                                return GB_AddClassTile(onTap: _addClass);
+                              }
 
-                          return GB_ClassTile(
-                            classInfo: classes[index],
-                            subtitle: _studentCountLabel(classes[index].id),
-                            onTap: () => _openClass(classes[index]),
-                            onDelete: () => _deleteClass(classes[index]),
+                              return GB_ClassTile(
+                                classInfo: classes[index],
+                                subtitle: _studentCountLabel(classes[index].id),
+                                onTap: () => _openClass(classes[index]),
+                                onDelete: () => _deleteClass(classes[index]),
+                              );
+                            },
                           );
                         },
                       );
                     },
-                  );
-                },
-              ),
-            ),
-            // Clears the FAB so the last class tile is never trapped under it.
-            const SliverToBoxAdapter(child: SizedBox(height: 80.0)),
-          ],
+                  ),
+                ),
+              // Clears the FAB so the last class tile is never trapped under it.
+              const SliverToBoxAdapter(child: SizedBox(height: 80.0)),
+            ],
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -279,6 +362,42 @@ class _GB_TeacherDashboardState extends State<GB_TeacherDashboard> {
         child: const Icon(Icons.group_add),
       ),
       bottomNavigationBar: _buildBottomNavigationBar(),
+    );
+  }
+
+  /// Stands in for the class list when the first load failed, with a way to
+  /// try again that does not depend on knowing pull-to-refresh exists.
+  Widget _buildLoadError(String message) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: kHomeHorizontalPadding,
+        vertical: 16.0,
+      ),
+      child: Column(
+        children: [
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: kEventSubtitleTextSize,
+              height: 1.4,
+              color: kHomeSubtitleTextColor,
+            ),
+          ),
+          const SizedBox(height: 12.0),
+          OutlinedButton(
+            onPressed: () {
+              setState(() {
+                _isFirstLoad = true;
+                _loadError = null;
+              });
+              _refresh();
+            },
+            style: OutlinedButton.styleFrom(foregroundColor: kHomeAccentColor),
+            child: const Text("Try again"),
+          ),
+        ],
+      ),
     );
   }
 

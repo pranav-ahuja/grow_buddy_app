@@ -12,8 +12,9 @@ import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Globals.dart'
 /// stored session or starts at onboarding.
 ///
 /// It is the launch-time counterpart of `gRouteAfterAuth`, and answers the same
-/// question the same way — `needsAccountType` goes to [GB_CompleteProfile],
-/// everything else to [GB_Dashboard].
+/// question the same way — a missing role, email, or phone number
+/// (`needsProfileCompletion`) goes to [GB_CompleteProfile], everything else to
+/// [GB_Dashboard].
 class GB_SessionGate extends StatefulWidget {
   const GB_SessionGate({super.key});
 
@@ -73,7 +74,7 @@ class _GB_SessionGateState extends State<GB_SessionGate> {
 
   void _goToSignedIn(GB_User user) {
     _goTo(
-      user.needsAccountType
+      user.needsProfileCompletion
           ? const GB_CompleteProfile(isNewUser: false)
           : const GB_Dashboard(),
     );

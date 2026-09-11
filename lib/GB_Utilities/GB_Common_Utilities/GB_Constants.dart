@@ -37,6 +37,19 @@ const Color kClassTileGreenBorder = Color(0x8002685F);
 const Color kClassTilePurpleFill = Color(0x80FFD7F9);
 const Color kClassTilePurpleBorder = Color(0x80A2008A);
 
+// Four more pastels beyond the design's five, so a teacher choosing a colour has
+// something to choose between. Mixed to the same recipe — a 50%-opacity wash
+// over white under a 50%-opacity border of the same hue — so a class in one of
+// these is indistinguishable in weight from a class in a design tint.
+const Color kClassTilePeachFill = Color(0x80FFE7D6);
+const Color kClassTilePeachBorder = Color(0x80D97D3A);
+const Color kClassTileLavenderFill = Color(0x80E9E2FF);
+const Color kClassTileLavenderBorder = Color(0x807B61C9);
+const Color kClassTileAquaFill = Color(0x80D4F5F2);
+const Color kClassTileAquaBorder = Color(0x80189B8E);
+const Color kClassTileSageFill = Color(0x80E4EFD9);
+const Color kClassTileSageBorder = Color(0x805F8A3A);
+
 //Home Screen Sizing
 // The design is drawn on a 360x800 screen; the fractions below reproduce its
 // 328pt card on a 344pt pitch so the neighbouring cards peek by the same amount
@@ -53,6 +66,15 @@ const double kClassTileGap = 12.0;
 const double kClassTileAvatarRadius = 24.0;
 const double kClassDeleteIconSize = 22.0;
 const double kHomeHorizontalPadding = 16.0;
+
+//Class Colour Picker
+// The swatch is a class tile in miniature: the same fill under the same border,
+// so what is picked is literally what the dashboard will draw.
+const double kClassSwatchSize = 36.0;
+const double kClassSwatchGap = 10.0;
+const double kClassSwatchBorderWidth = 1.0;
+const double kClassSwatchSelectedBorderWidth = 2.0;
+const double kClassSwatchCheckSize = 18.0;
 
 //Home Screen Text Sizes
 const double kHomeAppBarTextSize = 24.0;
@@ -84,15 +106,6 @@ const double kFeatureCardRadius = 20.0;
 const double kFeatureIconSize = 60.0;
 const double kFeatureLabelTextSize = 14.0;
 const double kFeatureRowGap = 24.0;
-
-/// The student id the app assigns on registration, e.g. "GB-0007".
-///
-/// A prefix plus a zero-padded serial rather than the bare row number: the id
-/// is read aloud and written on paper registers, and "7" is not something a
-/// teacher can recognise as a student id once it is off the screen. Four digits
-/// carry a school to 9999 pupils before the format has to grow.
-const String kStudentIdPrefix = "GB-";
-const int kStudentIdDigits = 4;
 
 const double kStudentCardWidth = 92.0;
 const double kStudentCardHeight = 120.0;
@@ -166,6 +179,9 @@ const TextStyle kH2TextStyle = TextStyle(
   fontWeight: FontWeight.w400,
 );
 
+//OTP Constants
+const double kOtpDigitTextSize = 26.0;
+
 //Elevated button Constants
 const double kElevatedButtonVerticalPadding = 10.0;
 const double kElevatedButtonTextSize = 18.0;
@@ -205,3 +221,9 @@ const String kOtpVerifyUrl = '$kApiPrefix/auth/otp/verify';
 const String kGoogleLoginUrl = '$kApiPrefix/auth/google';
 // GET returns the current user; PATCH completes their profile.
 const String kMeUrl = '$kApiPrefix/auth/me';
+
+// A teacher's classes and students. Everything under these is scoped to the
+// signed-in user by the bearer token, which is what makes the same account show
+// the same classes on every device.
+const String kClassesUrl = '$kApiPrefix/classes';
+const String kStudentsUrl = '$kApiPrefix/students';

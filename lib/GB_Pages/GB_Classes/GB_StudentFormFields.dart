@@ -31,6 +31,8 @@ class GB_SheetTextField extends StatelessWidget {
     this.inputFormatters,
     this.maxLines = 1,
     this.validator,
+    this.onTap,
+    this.suffixIcon,
   });
 
   final TextEditingController controller;
@@ -42,6 +44,12 @@ class GB_SheetTextField extends StatelessWidget {
   final int maxLines;
   final FormFieldValidator<String>? validator;
 
+  /// Makes the field a button that opens a picker, like the date of birth:
+  /// read-only, no keyboard, and [onTap] runs instead of typing.
+  final VoidCallback? onTap;
+
+  final IconData? suffixIcon;
+
   @override
   Widget build(BuildContext context) {
     return TextFormField(
@@ -51,6 +59,8 @@ class GB_SheetTextField extends StatelessWidget {
       inputFormatters: inputFormatters,
       maxLines: maxLines,
       validator: validator,
+      readOnly: onTap != null,
+      onTap: onTap,
       style: const TextStyle(
         fontSize: kFieldInputTextSize,
         height: 24.0 / kFieldInputTextSize,
@@ -61,6 +71,9 @@ class GB_SheetTextField extends StatelessWidget {
         // The asterisk rather than a "(required)" suffix: the design has no
         // room for the longer form beside a 140pt half-width field.
         labelText: isRequired ? "$label *" : label,
+        suffixIcon: suffixIcon == null
+            ? null
+            : Icon(suffixIcon, color: kHomeSubtitleTextColor),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16.0,

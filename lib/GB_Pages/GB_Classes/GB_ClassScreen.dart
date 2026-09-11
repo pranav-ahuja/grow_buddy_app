@@ -73,22 +73,41 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
   }
 
   Future<void> _editClass() async {
-    final GB_ClassInfo? renamed = await gEditClassName(
+    final String previousName = _classInfo.name;
+    final Color previousFill = _classInfo.fillColor;
+    final GB_ClassInfo? edited = await gEditClass(
       context,
       classInfo: _classInfo,
     );
 
     // Null means cancelled. The dashboard reads the store directly, so it
     // repaints on its own; only this screen holds a copy that needs replacing.
-    if (renamed == null || !mounted) return;
+    if (edited == null || !mounted) return;
 
-    setState(() => _classInfo = renamed);
-    gShowSnack(context, "Class renamed to ${renamed.name}");
+    setState(() => _classInfo = edited);
+
+    // The form edits two things, so the confirmation says which one changed —
+    // "Class renamed" after a colour change would be a lie, and saying nothing
+    // after one leaves the teacher guessing whether Save took. Saving the form
+    // untouched is not worth a message at all.
+    final bool wasRenamed = edited.name != previousName;
+    final bool wasRecoloured = edited.fillColor != previousFill;
+
+    if (wasRenamed) {
+      gShowSnack(context, "Class renamed to ${edited.name}");
+    } else if (wasRecoloured) {
+      gShowSnack(
+        context,
+        "${edited.name} is now ${GB_ClassPalette.at(_colorSlot).name}",
+      );
+    }
   }
 
+  /// The palette slot this class is currently painted in.
+  int get _colorSlot => GB_ClassPalette.slotForFill(_classInfo.fillColor);
+
   /// The opaque version of this class's list tint, for the header panel.
-  Color get _panelColor =>
-      GB_ClassPalette.panelAt(GB_ClassPalette.slotForFill(_classInfo.fillColor));
+  Color get _panelColor => GB_ClassPalette.panelAt(_colorSlot);
 
   @override
   Widget build(BuildContext context) {

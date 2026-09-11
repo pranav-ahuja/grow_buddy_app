@@ -10,12 +10,14 @@ import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dar
 ///
 /// [fillColor]/[borderColor] travel with the class rather than being picked by
 /// list position, so a class keeps its colour when the list is reordered,
-/// filtered, or added to. [GB_ClassPalette] hands out the design's five tints.
+/// filtered, or added to. [GB_ClassPalette] holds the pastels they come from;
+/// the teacher picks one when adding the class and can change it from "Edit
+/// class" afterwards.
 class GB_ClassInfo {
-  /// Stable identity, so a rename or a reorder cannot make two classes collide.
-  /// Names are deliberately not used as the key — nothing stops a teacher
-  /// creating two classes called "Nursery".
-  final int id;
+  /// The class id the server assigned, e.g. "CL_000003". Stable, so a rename or
+  /// a reorder cannot make two classes collide — names are deliberately not the
+  /// key.
+  final String id;
 
   final String name;
 
@@ -35,55 +37,124 @@ class GB_ClassInfo {
   });
 }
 
-/// The five fill/border pairs from the design, in order.
+/// One choosable class colour: the tile fill, its border, and the opaque
+/// version of the fill that the class screen's header panel uses.
 ///
-/// Kept as a cycle so a sixth class does not crash or come out uncoloured — it
-/// simply reuses the first tint. That matters now that teachers can add their
-/// own classes and the count is no longer fixed at five.
+/// The three travel together because they are one decision. A teacher picks
+/// "Mint", not a fill and a border and a panel, and nothing may pair the fill of
+/// one swatch with the border of another.
+class GB_ClassColor {
+  const GB_ClassColor({
+    required this.name,
+    required this.fill,
+    required this.border,
+    required this.panel,
+  });
+
+  /// What the swatch is called in the picker's tooltip, and what a confirmation
+  /// message can name — "Colour changed to Mint" beats quoting a hex value.
+  final String name;
+
+  final Color fill;
+  final Color border;
+
+  /// The flattened equivalent of [fill], for the class screen's header panel.
+  ///
+  /// The tile fills are 50% alpha so they sit softly on the dashboard's white
+  /// background; painting the same value across a 352pt panel would wash out
+  /// almost to nothing, so the panel uses this instead.
+  final Color panel;
+}
+
+/// Every colour a class can be — the design's five tints first, then four more
+/// in the same register.
+///
+/// Pastels only, deliberately: the tile fill sits behind the class name and the
+/// student count, and a saturated fill would take the contrast out from under
+/// both. Anything added here should be mixed to the same recipe as the rest.
+///
+/// Still a cycle, because a new class is given a colour before the teacher has
+/// had a chance to choose one — [GB_ClassStore] uses the next slot along as the
+/// default, and the picker starts there.
 class GB_ClassPalette {
   const GB_ClassPalette._();
 
-  static const List<Color> _fills = [
-    kClassTileYellowFill,
-    kClassTilePinkFill,
-    kClassTileBlueFill,
-    kClassTileGreenFill,
-    kClassTilePurpleFill,
+  static const List<GB_ClassColor> all = [
+    GB_ClassColor(
+      name: "Butter",
+      fill: kClassTileYellowFill,
+      border: kClassTileYellowBorder,
+      panel: Color(0xffFFFCF3),
+    ),
+    GB_ClassColor(
+      name: "Blush",
+      fill: kClassTilePinkFill,
+      border: kClassTilePinkBorder,
+      panel: Color(0xffFFF6F5),
+    ),
+    GB_ClassColor(
+      name: "Sky",
+      fill: kClassTileBlueFill,
+      border: kClassTileBlueBorder,
+      panel: Color(0xffF0FBFF),
+    ),
+    GB_ClassColor(
+      name: "Mint",
+      fill: kClassTileGreenFill,
+      border: kClassTileGreenBorder,
+      panel: Color(0xffEBFFF7),
+    ),
+    GB_ClassColor(
+      name: "Orchid",
+      fill: kClassTilePurpleFill,
+      border: kClassTilePurpleBorder,
+      panel: Color(0xffFFEBFC),
+    ),
+    GB_ClassColor(
+      name: "Peach",
+      fill: kClassTilePeachFill,
+      border: kClassTilePeachBorder,
+      panel: Color(0xffFFF3EA),
+    ),
+    GB_ClassColor(
+      name: "Lavender",
+      fill: kClassTileLavenderFill,
+      border: kClassTileLavenderBorder,
+      panel: Color(0xffF4F0FF),
+    ),
+    GB_ClassColor(
+      name: "Aqua",
+      fill: kClassTileAquaFill,
+      border: kClassTileAquaBorder,
+      panel: Color(0xffE9FAF8),
+    ),
+    GB_ClassColor(
+      name: "Sage",
+      fill: kClassTileSageFill,
+      border: kClassTileSageBorder,
+      panel: Color(0xffF1F7EC),
+    ),
   ];
 
-  static const List<Color> _borders = [
-    kClassTileYellowBorder,
-    kClassTilePinkBorder,
-    kClassTileBlueBorder,
-    kClassTileGreenBorder,
-    kClassTilePurpleBorder,
-  ];
+  static int get length => all.length;
 
-  /// The opaque version of each tint, for the class screen's header panel.
-  ///
-  /// The list tints are 50% alpha so they sit softly on the dashboard's white
-  /// background; painting the same value across a 352pt panel would wash out
-  /// almost to nothing, so the panel uses these flattened equivalents.
-  static const List<Color> _panels = [
-    Color(0xffFFFCF3),
-    Color(0xffFFF6F5),
-    Color(0xffF0FBFF),
-    Color(0xffEBFFF7),
-    Color(0xffFFEBFC),
-  ];
+  /// The colour in [index], wrapping so a slot past the end is a colour rather
+  /// than a crash.
+  static GB_ClassColor at(int index) => all[index % all.length];
 
-  static int get length => _fills.length;
+  static Color fillAt(int index) => at(index).fill;
 
-  static Color fillAt(int index) => _fills[index % _fills.length];
+  static Color borderAt(int index) => at(index).border;
 
-  static Color borderAt(int index) => _borders[index % _borders.length];
-
-  static Color panelAt(int index) => _panels[index % _panels.length];
+  static Color panelAt(int index) => at(index).panel;
 
   /// Finds the palette slot a class was given, so the class screen can paint
-  /// its header in the same hue the dashboard tile used.
+  /// its header in the same hue the dashboard tile used, and the picker can open
+  /// on the colour the class already has.
   static int slotForFill(Color fill) {
-    final int index = _fills.indexOf(fill);
+    final int index = all.indexWhere(
+      (GB_ClassColor color) => color.fill == fill,
+    );
     return index == -1 ? 0 : index;
   }
 }
@@ -170,36 +241,38 @@ class GB_StudentContact {
 /// One pupil: what the register-student form collects, and what the class
 /// screen's "Students list" row shows.
 ///
-/// Only [name], [age], [gender], and [address] are required — they are the four
-/// the form insists on. Everything else defaults to empty or null so a teacher
-/// can register a student from the minimum and fill the rest in later.
+/// Only [name], [dateOfBirth], [gender], [address], and the class are required
+/// — the ones the form insists on. Everything else defaults to empty or null
+/// so a teacher can register a student from the minimum and fill the rest in
+/// later.
 class GB_Student {
-  /// Stable identity, handed out by [GB_StudentStore]. Defaults to -1 for the
-  /// placeholder students that are constructed inline rather than registered.
-  final int id;
-
-  /// The id a teacher actually sees and quotes, e.g. "GB-0007", assigned at
-  /// registration by [GB_StudentStore].
-  ///
-  /// Kept separate from [id] rather than formatted from it on demand: [id] is
-  /// an implementation detail that the backend will eventually own, while this
-  /// is a value that goes on registers and report cards and must not change if
-  /// the internal key ever does.
+  /// The student id the server assigned, e.g. "ST_000007" — the student's
+  /// identity, and the id a teacher sees and quotes. Empty only on a student
+  /// that has not been sent to the server yet.
   final String studentId;
 
   final String name;
 
-  /// Free text rather than an int: the design shows "Age" as a caption, and
-  /// real data will likely be "4 yrs" or a date of birth rendered as an age.
-  final String age;
+  /// Stored instead of an age, which would be wrong a year later. [ageYears]
+  /// works the age out from it.
+  final DateTime dateOfBirth;
 
   final String gender;
   final String address;
 
-  /// The class the student was added to, or null when registered without one.
-  /// Held as an id, not a [GB_ClassInfo], so renaming or recolouring a class
-  /// cannot leave the student holding a stale copy of it.
-  final int? classId;
+  /// The class the student is in, e.g. "CL_000003". Held as an id, not a
+  /// [GB_ClassInfo], so renaming or recolouring a class cannot leave the
+  /// student holding a stale copy of it.
+  ///
+  /// Null only on a student read out of a class file, before the restore has
+  /// created the class they are going back into.
+  final String? classId;
+
+  /// The student's position in their class, alphabetically — 1 for the first
+  /// name. Worked out by the server on every read, so it shifts when a student
+  /// with an earlier name joins or one before them leaves. Null before the
+  /// server has seen the student.
+  final int? rollNumber;
 
   /// A photo the teacher picked, as a file path on the device. Null when they
   /// skipped it, in which case [imagePath] is what gets drawn.
@@ -213,17 +286,26 @@ class GB_Student {
   final GB_StudentContact? guardian;
 
   const GB_Student({
-    this.id = -1,
     this.studentId = "",
     required this.name,
-    required this.age,
+    required this.dateOfBirth,
     required this.imagePath,
     this.gender = "",
     this.address = "",
     this.classId,
+    this.rollNumber,
     this.photoPath,
     this.mother,
     this.father,
     this.guardian,
   });
+
+  /// Completed years of age as of [today] (defaulting to now) — a child is 4
+  /// from their fourth birthday until the day before their fifth.
+  int ageYears([DateTime? today]) {
+    final DateTime now = today ?? DateTime.now();
+    final bool hadBirthdayThisYear = now.month > dateOfBirth.month ||
+        (now.month == dateOfBirth.month && now.day >= dateOfBirth.day);
+    return now.year - dateOfBirth.year - (hadBirthdayThisYear ? 0 : 1);
+  }
 }

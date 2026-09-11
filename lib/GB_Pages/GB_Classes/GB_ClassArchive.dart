@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:excel/excel.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassModels.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ClassApi.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 
 /// The spreadsheet a class is written to when it is deleted, and read back from
@@ -50,9 +51,13 @@ class GB_ClassArchiveData {
 class GB_ClassArchive {
   const GB_ClassArchive._();
 
-  /// Written into the Class sheet so a file from a future, incompatible build
-  /// can be rejected with a clear message instead of parsed into nonsense.
-  static const String formatVersion = "grow-buddy-class-v1";
+  /// Written into the Class sheet so a file from an incompatible build can be
+  /// rejected with a clear message instead of parsed into nonsense.
+  ///
+  /// v2 carries a date of birth where v1 carried an age. A v1 file cannot be
+  /// restored: an age cannot be turned back into the date the server requires.
+  static const String formatVersion = "grow-buddy-class-v2";
+  static const String _formatVersion1 = "grow-buddy-class-v1";
 
   static const String classSheetName = "Class";
   static const String studentsSheetName = "Students";
@@ -61,10 +66,15 @@ class GB_ClassArchive {
   ///
   /// [decode] looks columns up by these names rather than by position, so a
   /// column added here later does not invalidate files written today.
+  ///
+  /// "Roll Number" is written for the teacher reading the spreadsheet and
+  /// ignored on restore — roll numbers are alphabetical within a class, so the
+  /// server works them out afresh.
   static const List<String> studentColumns = <String>[
     "Student ID",
+    "Roll Number",
     "Name",
-    "Age",
+    "Date of Birth",
     "Gender",
     "Address",
     "Photo",
@@ -140,8 +150,9 @@ class GB_ClassArchive {
 
       sheet.appendRow(_textRow(<String>[
         student.studentId,
+        student.rollNumber?.toString() ?? "",
         student.name,
-        student.age,
+        GB_ClassApi.formatDate(student.dateOfBirth),
         student.gender,
         student.address,
         // The photo travels as the path it had on this device. A restore onto
@@ -207,6 +218,13 @@ class GB_ClassArchive {
     final Map<String, String> classFields = _readClassFields(classSheet);
 
     final String? format = classFields["Format"];
+    if (format == _formatVersion1) {
+      throw const GB_ClassArchiveException(
+        "That class file is from an older version of the app. It records "
+        "students' ages rather than their dates of birth, so it can't be "
+        "restored.",
+      );
+    }
     if (format != null && format != formatVersion) {
       throw const GB_ClassArchiveException(
         "That class file was made by a newer version of the app",
@@ -265,11 +283,22 @@ class GB_ClassArchive {
 
       final String photo = read("Photo");
 
+      // Checked here rather than left to the server: a restore is all or
+      // nothing, and a message naming the student is something the teacher can
+      // fix in the spreadsheet, where a 422 from the server is not.
+      final DateTime? dateOfBirth = DateTime.tryParse(read("Date of Birth"));
+      if (dateOfBirth == null) {
+        throw GB_ClassArchiveException(
+          "$name has no valid date of birth in that class file. Dates are "
+          "written like 2021-04-12.",
+        );
+      }
+
       students.add(
         GB_Student(
           studentId: read("Student ID"),
           name: name,
-          age: read("Age"),
+          dateOfBirth: dateOfBirth,
           gender: read("Gender"),
           address: read("Address"),
           photoPath: photo.isEmpty ? null : photo,
@@ -342,15 +371,5 @@ class GB_ClassArchive {
         .replaceAll(RegExp(r"\s+"), "_");
 
     return "${safeName.isEmpty ? "class" : safeName}_class_$stamp.xlsx";
-  }
-
-  /// The serial inside a student id, e.g. "GB-0007" -> 7, or null if the id is
-  /// not one the app issued.
-  ///
-  /// The store uses this after a restore to push its counter past every id that
-  /// came back, so the next registration cannot reissue one of them.
-  static int? serialInStudentId(String studentId) {
-    if (!studentId.startsWith(kStudentIdPrefix)) return null;
-    return int.tryParse(studentId.substring(kStudentIdPrefix.length));
   }
 }

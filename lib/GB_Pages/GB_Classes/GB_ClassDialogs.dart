@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassStore.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassWidgets.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 
 /// The two small decisions a class asks of a teacher: are you sure you want to
-/// delete this, and what should it be called.
+/// delete this, and what should it be called and coloured.
 ///
 /// Dialogs rather than sheets or routes: both are a single question with two
 /// answers, and both are asked from on top of the list or screen the answer
@@ -67,38 +69,45 @@ Future<bool> gConfirmDeleteClass(
   return confirmed ?? false;
 }
 
-/// Asks for a new name for [classInfo] and applies it.
+/// Asks for a new name and theme colour for [classInfo] and applies them.
 ///
-/// Returns the renamed class, or null if the teacher cancelled or changed
-/// nothing. The rename happens here rather than at the call site so the same
-/// duplicate rule the add form enforces cannot be forgotten by a second caller.
-Future<GB_ClassInfo?> gEditClassName(
+/// Returns the edited class, or null if the teacher cancelled. The edit happens
+/// here rather than at the call site so the same duplicate rule the add form
+/// enforces cannot be forgotten by a second caller.
+Future<GB_ClassInfo?> gEditClass(
   BuildContext context, {
   required GB_ClassInfo classInfo,
 }) {
   return showDialog<GB_ClassInfo>(
     context: context,
-    builder: (BuildContext context) => _GB_EditClassNameDialog(
+    builder: (BuildContext context) => _GB_EditClassDialog(
       classInfo: classInfo,
     ),
   );
 }
 
-class _GB_EditClassNameDialog extends StatefulWidget {
-  const _GB_EditClassNameDialog({required this.classInfo});
+class _GB_EditClassDialog extends StatefulWidget {
+  const _GB_EditClassDialog({required this.classInfo});
 
   final GB_ClassInfo classInfo;
 
   @override
-  State<_GB_EditClassNameDialog> createState() =>
-      _GB_EditClassNameDialogState();
+  State<_GB_EditClassDialog> createState() => _GB_EditClassDialogState();
 }
 
-class _GB_EditClassNameDialogState extends State<_GB_EditClassNameDialog> {
+class _GB_EditClassDialogState extends State<_GB_EditClassDialog> {
   late final TextEditingController _controller =
       TextEditingController(text: widget.classInfo.name);
 
+  /// Opens on the colour the class already has, so the dialog shows the current
+  /// state rather than asking the teacher to re-pick it to keep it.
+  late int _colorSlot =
+      GB_ClassPalette.slotForFill(widget.classInfo.fillColor);
+
   String? _error;
+
+  /// True while the edit is with the server, so Save cannot send it twice.
+  bool _isSaving = false;
 
   @override
   void dispose() {
@@ -106,7 +115,8 @@ class _GB_EditClassNameDialogState extends State<_GB_EditClassNameDialog> {
     super.dispose();
   }
 
-  void _save() {
+  Future<void> _save() async {
+    if (_isSaving) return;
     final String name = _controller.text.trim();
 
     if (name.isEmpty) {
@@ -121,44 +131,85 @@ class _GB_EditClassNameDialogState extends State<_GB_EditClassNameDialog> {
       return;
     }
 
-    Navigator.of(context).pop(
-      GB_ClassStore.renameClass(widget.classInfo.id, name),
-    );
+    setState(() => _isSaving = true);
+
+    try {
+      // Both in one call: a name change and a colour change made on the same
+      // form are one edit, and applying them separately would repaint the
+      // dashboard twice and publish a half-edited class in between.
+      final GB_ClassInfo edited = await GB_ClassStore.updateClass(
+        widget.classInfo.id,
+        name: name,
+        colorSlot: _colorSlot,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(edited);
+    } on GB_ApiException catch (error) {
+      if (!mounted) return;
+      // Kept open with the edit intact, so the teacher can fix the name or
+      // retry rather than retyping it. A class deleted from another device
+      // reports as not found here.
+      setState(() {
+        _error = error.message;
+        _isSaving = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: kPrimaryColor2,
+      // The dialog is now a field plus two rows of swatches, which on a short
+      // screen with the keyboard up is taller than the space it is given.
+      // Without this it would overflow rather than scroll.
+      scrollable: true,
       title: const Text("Edit class"),
       titleTextStyle: const TextStyle(
         fontSize: kClassAppBarTitleSize,
         fontWeight: FontWeight.w500,
         color: kHomeTitleTextColor,
       ),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        textCapitalization: TextCapitalization.words,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _save(),
-        // The message is about what was submitted, so it goes the moment the
-        // teacher starts fixing it.
-        onChanged: (_) {
-          if (_error != null) setState(() => _error = null);
-        },
-        decoration: InputDecoration(
-          labelText: "Class name",
-          errorText: _error,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(kClassTileRadius),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(kClassTileRadius),
-            borderSide: const BorderSide(color: kHomeAccentColor),
-          ),
-          labelStyle: const TextStyle(color: kHomeSubtitleTextColor),
-          floatingLabelStyle: const TextStyle(color: kHomeAccentColor),
+      // maxFinite, so the swatch row has a width to wrap inside — an
+      // AlertDialog otherwise sizes its content to the widest child, and a Wrap
+      // asked to lay out in unbounded width never wraps at all.
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _save(),
+              // The message is about what was submitted, so it goes the moment
+              // the teacher starts fixing it.
+              onChanged: (_) {
+                if (_error != null) setState(() => _error = null);
+              },
+              decoration: InputDecoration(
+                labelText: "Class name",
+                errorText: _error,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(kClassTileRadius),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(kClassTileRadius),
+                  borderSide: const BorderSide(color: kHomeAccentColor),
+                ),
+                labelStyle: const TextStyle(color: kHomeSubtitleTextColor),
+                floatingLabelStyle: const TextStyle(color: kHomeAccentColor),
+              ),
+            ),
+            const SizedBox(height: 20.0),
+            GB_ClassColorPicker(
+              selectedSlot: _colorSlot,
+              onSelected: (int slot) => setState(() => _colorSlot = slot),
+            ),
+          ],
         ),
       ),
       actions: [
@@ -168,9 +219,9 @@ class _GB_EditClassNameDialogState extends State<_GB_EditClassNameDialog> {
           child: const Text("Cancel"),
         ),
         TextButton(
-          onPressed: _save,
+          onPressed: _isSaving ? null : _save,
           style: TextButton.styleFrom(foregroundColor: kHomeAccentColor),
-          child: const Text("Save"),
+          child: Text(_isSaving ? "Saving…" : "Save"),
         ),
       ],
     );

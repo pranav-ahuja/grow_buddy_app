@@ -12,5 +12,6 @@ pyjwt==2.10.1
 google-auth==2.37.0
 requests==2.32.3
 
-# Uncomment when you move from SQLite to PostgreSQL
-# psycopg[binary]==3.2.3
+# PostgreSQL driver. SQLAlchemy picks it from the "postgresql+psycopg://"
+# scheme in DATABASE_URL; SQLite still works for the test suite without it.
+psycopg[binary]==3.2.3

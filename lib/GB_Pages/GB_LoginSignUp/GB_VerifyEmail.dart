@@ -81,7 +81,7 @@ class _GB_VerifyEmailState extends State<GB_VerifyEmail> {
       width: 40.0,
       height: 50.0,
       textStyle: TextStyle(
-        fontSize: 20.0,
+        fontSize: kOtpDigitTextSize,
         color: kTextColor,
         fontWeight: FontWeight.w500,
       ),
