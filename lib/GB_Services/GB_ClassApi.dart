@@ -110,6 +110,10 @@ class GB_ClassApi {
       imagePath: kClassAvatarImage,
       fillColor: color.fill,
       borderColor: color.border,
+      // Sent by the list endpoint only, so null on a class just created or
+      // renamed. The principal's dashboard reloads after either, which is
+      // where it matters.
+      teacherName: json["teacher_name"] as String?,
     );
   }
 

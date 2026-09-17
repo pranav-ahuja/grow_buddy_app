@@ -27,6 +27,14 @@ class GB_ClassInfo {
   final Color fillColor;
   final Color borderColor;
 
+  /// The name of the teacher who owns this class.
+  ///
+  /// For the principal's dashboard, which lists every class in the school:
+  /// two teachers each having a "Nursery" is normal and allowed, so without
+  /// the owner's name that list is two identical tiles. Null when the server
+  /// did not send one.
+  final String? teacherName;
+
   const GB_ClassInfo({
     required this.id,
     required this.name,
@@ -34,6 +42,7 @@ class GB_ClassInfo {
     required this.imagePath,
     required this.fillColor,
     required this.borderColor,
+    this.teacherName,
   });
 }
 

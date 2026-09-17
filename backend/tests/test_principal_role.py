@@ -74,32 +74,44 @@ def test_profile_completion_can_choose_principal(client):
     assert response.json()["role"] == "principal"
 
 
-def test_a_principal_is_not_a_teacher(client):
-    """A principal gets no TR_ profile and no access to the classes router.
+def test_a_principal_can_read_classes_but_owns_none(client):
+    """A principal reads school-wide, but gets no TR_ row and owns nothing.
 
-    This is the guard worth having in phase 1. The obvious way to make the
-    principal's dashboard work would have been to let `_current_teacher` accept
-    them, which would have quietly given every principal a teacher's
-    class-owning identity. Their access is coming, but as its own thing.
+    This is the guard worth keeping. The obvious way to make the principal's
+    dashboard work would have been to let `_current_teacher` accept them, which
+    would have quietly given every principal a teacher's class-owning identity
+    — and every class they created would have been filed under it. Reading is
+    scoped by role instead; owning stays a teacher's.
     """
     token = client.post(SIGNUP, json=PRINCIPAL).json()["access_token"]
+
+    assert client.get(CLASSES, headers=auth(token)).status_code == 200
+
+    refused = client.post(
+        CLASSES,
+        json={"name": "Nursery", "color_slot": 0},
+        headers=auth(token),
+    )
+    assert refused.status_code == 403
+    assert "does not own one" in refused.json()["detail"]
+
+
+def test_a_student_still_reaches_nothing(client):
+    """The 403 a student gets is unchanged — only the principal's path moved."""
+    token = client.post(
+        SIGNUP,
+        json={
+            "full_name": "Aarav Sharma",
+            "identifier": "pupil@example.com",
+            "password": "supersecret123",
+            "account_type": ACCOUNT_TYPE_STUDENT,
+        },
+    ).json()["access_token"]
 
     response = client.get(CLASSES, headers=auth(token))
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Only teachers can manage classes"
-
-
-def test_creating_a_class_as_principal_is_refused(client):
-    token = client.post(SIGNUP, json=PRINCIPAL).json()["access_token"]
-
-    response = client.post(
-        CLASSES,
-        json={"name": "Nursery", "color_slot": 0},
-        headers=auth(token),
-    )
-
-    assert response.status_code == 403
 
 
 def test_teacher_and_student_signups_are_unaffected(client):

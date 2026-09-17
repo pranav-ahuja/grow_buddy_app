@@ -7,7 +7,14 @@ from app import codes
 from app.accounts import ensure_teacher
 from app.database import class_roster
 from app.deps import CurrentUser, DbSession
-from app.models import ROLE_TEACHER, SchoolClass, Student, Teacher, User
+from app.models import (
+    ROLE_PRINCIPAL,
+    ROLE_TEACHER,
+    SchoolClass,
+    Student,
+    Teacher,
+    User,
+)
 from app.schemas import (
     ClassCreateRequest,
     ClassOut,
@@ -34,13 +41,60 @@ _SAME_CHILD_EXACT = (
 
 
 def _current_teacher(db: Session, user: User) -> Teacher:
-    """The teacher profile behind this request. Classes are a teacher's; a
-    student-portal user has none."""
+    """The teacher profile behind this request — for anything that needs an
+    *owner*.
+
+    A class belongs to a teacher, so creating, renaming, recolouring or
+    deleting one is a teacher's act. The principal is refused here on purpose
+    and told why: they see every class (see [_reader_scope]) and will later
+    assign teachers to them, but they do not own one.
+    """
+    if user.role == ROLE_PRINCIPAL:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail=(
+                "A class is created and edited by the teacher who owns it. "
+                "A principal can see every class but does not own one."
+            ),
+        )
     if user.role != ROLE_TEACHER:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, detail="Only teachers can manage classes"
         )
     return ensure_teacher(db, user)
+
+
+def _reader_scope(db: Session, user: User) -> Teacher | None:
+    """Who this request is allowed to *read*, as a scope.
+
+    Returns the teacher to filter by, or **None meaning school-wide** — which
+    is the principal, whose whole job needs every class and every student.
+
+    None rather than a separate branch at each call site so the scope is
+    decided once, here, by role. The filter is then either applied or not; a
+    caller cannot accidentally read school-wide because it forgot to narrow.
+    """
+    if user.role == ROLE_PRINCIPAL:
+        return None
+    return _current_teacher(db, user)
+
+
+def _readable_class(db: Session, user: User, class_id: str) -> SchoolClass:
+    """One class, if this user is allowed to see it.
+
+    A teacher's own, or any class at all for the principal. Reported as 404
+    rather than 403 when it is somebody else's, so the endpoint cannot be used
+    to discover which ids exist.
+    """
+    teacher = _reader_scope(db, user)
+
+    if teacher is None:
+        school_class = db.get(SchoolClass, class_id)
+        if school_class is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Class not found")
+        return school_class
+
+    return _owned_class(db, teacher, class_id)
 
 
 def _owned_class(db: Session, teacher: Teacher, class_id: str) -> SchoolClass:
@@ -132,17 +186,41 @@ def _commit_or_409(db: Session, message: str) -> None:
 # --- Classes -----------------------------------------------------------------
 
 
-@router.get("/classes", response_model=list[ClassOut])
-def list_classes(user: CurrentUser, db: DbSession) -> list[SchoolClass]:
-    teacher = _current_teacher(db, user)
-    # Creation order, which is the order the dashboard has always listed them.
-    return list(
-        db.scalars(
-            select(SchoolClass)
-            .where(SchoolClass.teacher_id == teacher.teacher_id)
-            .order_by(SchoolClass.class_id)
+def _classes_out(db: Session, *conditions) -> list[ClassOut]:
+    """Classes with the name of the teacher who owns each.
+
+    The name is joined in for the principal's dashboard, which lists every
+    class in the school: two teachers each having a "Nursery" is normal, so a
+    flat list without the owner's name would be actively misleading. A teacher
+    reading their own list just sees their own name, which costs nothing.
+    """
+    rows = db.execute(
+        select(SchoolClass, User.full_name)
+        .join(Teacher, Teacher.teacher_id == SchoolClass.teacher_id)
+        .join(User, User.user_id == Teacher.user_id)
+        .where(*conditions)
+        # Creation order, which is the order the dashboard has always listed them.
+        .order_by(SchoolClass.class_id)
+    ).all()
+
+    columns = [column.key for column in SchoolClass.__table__.columns]
+    return [
+        ClassOut.model_validate(
+            {key: getattr(school_class, key) for key in columns}
+            | {"teacher_name": teacher_name}
         )
-    )
+        for school_class, teacher_name in rows
+    ]
+
+
+@router.get("/classes", response_model=list[ClassOut])
+def list_classes(user: CurrentUser, db: DbSession) -> list[ClassOut]:
+    """A teacher's own classes — or, for the principal, every class there is."""
+    teacher = _reader_scope(db, user)
+
+    if teacher is None:
+        return _classes_out(db)
+    return _classes_out(db, SchoolClass.teacher_id == teacher.teacher_id)
 
 
 @router.post(
@@ -250,8 +328,7 @@ def delete_class(class_id: str, user: CurrentUser, db: DbSession) -> Response:
 @router.get("/classes/{class_id}/roster", response_model=list[RosterEntry])
 def class_roster_for(class_id: str, user: CurrentUser, db: DbSession) -> list:
     """The class as a table: class id, class name, roll number, student name."""
-    teacher = _current_teacher(db, user)
-    _owned_class(db, teacher, class_id)
+    _readable_class(db, user, class_id)
     return list(
         db.execute(
             select(class_roster)
@@ -268,7 +345,12 @@ def class_roster_for(class_id: str, user: CurrentUser, db: DbSession) -> list:
 def list_students(user: CurrentUser, db: DbSession) -> list[StudentOut]:
     # Every student at once rather than per class: the dashboard shows a count
     # on every tile, so it needs them all anyway, and one request beats nine.
-    teacher = _current_teacher(db, user)
+    teacher = _reader_scope(db, user)
+
+    # The principal has access to every student in the school — one of the
+    # things the role is for.
+    if teacher is None:
+        return _students_out(db)
     return _students_out(db, class_roster.c.teacher_id == teacher.teacher_id)
 
 
@@ -278,10 +360,11 @@ def list_students(user: CurrentUser, db: DbSession) -> list[StudentOut]:
 def create_student(
     payload: StudentCreateRequest, user: CurrentUser, db: DbSession
 ) -> StudentOut:
-    teacher = _current_teacher(db, user)
-    # A class id from someone else's account is not a class this student can
-    # be filed under.
-    school_class = _owned_class(db, teacher, payload.class_id)
+    # Registering a student is one of the things the principal may do too, into
+    # any class in the school; a teacher only into one of their own. A class id
+    # from someone else's account is not a class this student can be filed
+    # under.
+    school_class = _readable_class(db, user, payload.class_id)
 
     existing = _same_child(db, school_class.class_id, payload)
     if existing is not None:

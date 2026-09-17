@@ -359,6 +359,16 @@ class ClassOut(BaseModel):
     color_slot: int
     created_at: datetime
 
+    # Who owns the class. The principal's dashboard lists every class in the
+    # school, where two teachers each having a "Nursery" is normal — so without
+    # the owner's name that list would be actively misleading.
+    teacher_id: str
+
+    # Joined in by the list endpoint only. Optional, so the routes that return
+    # the ORM object straight back (create, update) still validate: there is no
+    # such attribute on SchoolClass, and the default fills in.
+    teacher_name: str | None = None
+
 
 class ClassCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=80)
