@@ -526,3 +526,209 @@ class AttendanceOut(BaseModel):
 
     # Joined in so a register reads as names rather than ids.
     student_name: str | None = None
+
+
+# --- Teacher profile ---------------------------------------------------------
+
+_DIGITS_ONLY_RE = re.compile(r"\D")
+
+# Long enough that nobody's real date of birth is refused, short enough that a
+# typo like 1092 is.
+MAX_TEACHER_AGE_YEARS = 100
+
+
+def _clean_aadhaar(value: str) -> str:
+    """Twelve digits, with whatever spacing the form allowed stripped off.
+
+    People write Aadhaar as "1234 5678 9012". Stored bare, so the unique index
+    treats the spaced and unspaced forms as the same number — otherwise one
+    person could hold two teacher rows by typing it differently.
+    """
+    digits = _DIGITS_ONLY_RE.sub("", value)
+    if len(digits) != 12:
+        raise ValueError("An Aadhaar number is 12 digits")
+    return digits
+
+
+class TeacherExperienceCreateRequest(BaseModel):
+    """One previous post."""
+
+    school_name: str = Field(min_length=1, max_length=160)
+    school_address: str = Field(default="", max_length=500)
+    years: float = Field(ge=0, le=60)
+
+    @field_validator("school_name", "school_address")
+    @classmethod
+    def _clean(cls, value: str) -> str:
+        return _clean_text(value)
+
+    @field_validator("school_name")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value:
+            raise ValueError("School name cannot be blank")
+        return value
+
+
+class TeacherExperienceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    school_name: str
+    school_address: str
+    years: float
+
+
+class TeacherSubjectOut(BaseModel):
+    """A subject on a teacher's record — just enough to name it."""
+
+    subject_id: str
+    name: str
+
+
+class TeacherClassOut(BaseModel):
+    """A class on a teacher's record."""
+
+    class_id: str
+    name: str
+
+
+class TeacherOut(BaseModel):
+    """A teacher's whole record, as the profile screen shows it.
+
+    `full_name`, `email` and `phone` are joined from `users` rather than stored
+    here — see the note on the Teacher model. So this object is assembled by
+    the router, not validated straight off one row.
+    """
+
+    teacher_id: str
+    user_id: str
+
+    full_name: str
+    email: str | None
+    phone: str | None
+
+    date_of_birth: date | None
+    highest_qualification: str | None
+    address: str | None
+    relationship_status: str | None
+
+    # The last four digits, and never more. The full number does not leave the
+    # server: nothing in the app needs it, and a response carrying complete
+    # Aadhaar numbers is a liability in every log and cache it passes through.
+    aadhaar_last4: str | None
+
+    emergency_contact_name: str | None
+    emergency_contact_phone: str | None
+
+    classes: list[TeacherClassOut]
+    subjects: list[TeacherSubjectOut]
+    experience: list[TeacherExperienceOut]
+
+    # What the profile screen should still ask for. Aadhaar is excluded: it is
+    # the one field a teacher may reasonably refuse, and counting it would nag
+    # them forever over something optional.
+    missing_profile_fields: list[str]
+    is_profile_complete: bool
+
+    created_at: datetime
+
+
+class TeacherProfileUpdateRequest(BaseModel):
+    """What the sign-up step and the profile screen send.
+
+    Every field optional so either can send only what it collected, but a
+    request that changes nothing is rejected rather than silently doing so.
+
+    Absent and null mean different things: a field left out is untouched, and
+    an explicit null clears it. Without that distinction a teacher could never
+    remove an address they entered by mistake.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    date_of_birth: date | None = None
+    highest_qualification: str | None = Field(default=None, max_length=120)
+    address: str | None = Field(default=None, max_length=500)
+    relationship_status: str | None = Field(default=None, max_length=32)
+    aadhaar_number: str | None = Field(default=None, max_length=20)
+    emergency_contact_name: str | None = Field(default=None, max_length=120)
+    emergency_contact_phone: str | None = Field(default=None, max_length=32)
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def _plausible(cls, value: date | None) -> date | None:
+        if value is None:
+            return None
+        today = date.today()
+        if value > today:
+            raise ValueError("Date of birth cannot be in the future")
+        if value.year < today.year - MAX_TEACHER_AGE_YEARS:
+            raise ValueError("Please check the date of birth")
+        return value
+
+    @field_validator(
+        "highest_qualification",
+        "address",
+        "relationship_status",
+        "emergency_contact_name",
+    )
+    @classmethod
+    def _clean_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        # An empty string means "clear this", so it stays None rather than "".
+        return _clean_text(value) or None
+
+    @field_validator("aadhaar_number")
+    @classmethod
+    def _check_aadhaar(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        return _clean_aadhaar(value)
+
+    @field_validator("emergency_contact_phone")
+    @classmethod
+    def _check_emergency_phone(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        phone = normalize_phone(value)
+        if not is_valid_phone(phone):
+            raise ValueError("Enter a valid phone number, e.g. +919876543210")
+        return phone
+
+    @model_validator(mode="after")
+    def _requires_something(self) -> "TeacherProfileUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError(
+                "Provide at least one of: date_of_birth, "
+                "highest_qualification, address, relationship_status, "
+                "aadhaar_number, emergency_contact_name, "
+                "emergency_contact_phone"
+            )
+        return self
+
+
+class TeacherSubjectsAssignRequest(BaseModel):
+    """The principal setting which subjects a teacher teaches.
+
+    The **whole set**, not an add or a remove. A screen with checkboxes knows
+    what it wants the answer to be; asking it to work out the difference is how
+    a half-applied edit leaves a subject assigned that the principal just
+    unticked.
+    """
+
+    subject_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("subject_ids")
+    @classmethod
+    def _no_duplicates(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("The same subject is listed twice")
+        return value
+
+
+class ClassTeacherAssignRequest(BaseModel):
+    """The principal moving a class to a teacher."""
+
+    teacher_id: str = Field(min_length=1, max_length=16)

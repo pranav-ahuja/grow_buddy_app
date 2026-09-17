@@ -8,6 +8,7 @@ from app.access import (
     owned_class,
     readable_class,
     reader_scope,
+    require_principal,
     require_teacher,
 )
 from app.database import class_roster
@@ -21,6 +22,7 @@ from app.models import (
 from app.schemas import (
     ClassCreateRequest,
     ClassOut,
+    ClassTeacherAssignRequest,
     ClassUpdateRequest,
     RosterEntry,
     StudentCreateRequest,
@@ -320,3 +322,71 @@ def create_student(
 
     # Read back through the roster, which is where the roll number comes from.
     return _students_out(db, Student.student_id == student.student_id)[0]
+
+
+@router.patch("/classes/{class_id}/teacher", response_model=ClassOut)
+def assign_class_teacher(
+    class_id: str,
+    payload: ClassTeacherAssignRequest,
+    user: CurrentUser,
+    db: DbSession,
+) -> ClassOut:
+    """Moves a class to another teacher. The principal's call.
+
+    This is the "add a teacher to a particular class" the principal's role
+    asks for, and it is why they cannot *create* a class: a class belongs to
+    the teacher who runs it, and the principal's part is deciding who that is.
+
+    Its own endpoint rather than a `teacher_id` field on `PATCH /classes/{id}`,
+    because the two have different owners — a teacher renames and recolours
+    their class, and only the principal may hand it to somebody else. One
+    endpoint would have to allow the field for a principal and refuse it for a
+    teacher, on a route the teacher otherwise uses freely.
+
+    **The students move with the class.** They belong to the class, not to the
+    teacher, so nothing about them changes — which is exactly why this is safe
+    to do mid-term. Attendance already taken keeps the teacher who took it.
+    """
+    require_principal(user, action="assign a class to a teacher")
+
+    school_class = db.get(SchoolClass, class_id)
+    if school_class is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Class not found")
+
+    teacher = db.get(Teacher, payload.teacher_id)
+    if teacher is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Teacher not found")
+
+    if teacher.teacher_id == school_class.teacher_id:
+        # Already theirs. Idempotent rather than an error — the end state is
+        # the one that was asked for.
+        return _classes_out(db, SchoolClass.class_id == class_id)[0]
+
+    # The receiving teacher may already have a class of this name, because
+    # uq_classes_teacher_name is per teacher. Checked here with its own wording
+    # rather than through _reject_duplicate_name: that one says "a class called
+    # X already exists", which on this endpoint reads as though the *principal*
+    # had the clash. The clash is on the teacher receiving it, and the message
+    # has to name them or it sends the reader looking in the wrong place.
+    clash = db.scalar(
+        select(SchoolClass.name).where(
+            SchoolClass.teacher_id == teacher.teacher_id,
+            func.lower(SchoolClass.name) == func.lower(school_class.name),
+            SchoolClass.class_id != class_id,
+        )
+    )
+    if clash is not None:
+        account = db.get(User, teacher.user_id)
+        who = account.full_name if account else teacher.teacher_id
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=f'{who} already has a class called "{clash}"',
+        )
+
+    school_class.teacher_id = teacher.teacher_id
+    _commit_or_409(
+        db,
+        f'That teacher already has a class called "{school_class.name}"',
+    )
+
+    return _classes_out(db, SchoolClass.class_id == class_id)[0]

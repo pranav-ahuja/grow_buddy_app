@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import engine
 from app.migrations import require_current
-from app.routers import attendance, auth, classes, subjects
+from app.routers import attendance, auth, classes, subjects, teachers
 
 logging.basicConfig(level=logging.INFO)
 
@@ -76,3 +76,4 @@ app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(classes.router, prefix=settings.api_prefix)
 app.include_router(subjects.router, prefix=settings.api_prefix)
 app.include_router(attendance.router, prefix=settings.api_prefix)
+app.include_router(teachers.router, prefix=settings.api_prefix)

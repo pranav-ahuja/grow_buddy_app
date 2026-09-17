@@ -1,5 +1,6 @@
 import uuid as uuid_lib
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Uuid,
     func,
@@ -135,14 +137,27 @@ class User(Base):
 class Teacher(Base):
     """The teacher side of a user whose role is 'teacher'. TR_000001.
 
-    Deliberately bare for now — the details a teacher profile will carry are
-    still to be decided. What it is already for: classes belong to a teacher,
-    not directly to a user, so the student portal can later give users a
-    different kind of profile without classes having to change.
+    Classes belong to a teacher, not directly to a user, so the student portal
+    can later give users a different kind of profile without classes having to
+    change. The link runs from here to the user rather than from the user to
+    here: a foreign key can only point at one table, and a user column holding
+    either a TR_ or an ST_ id could never be one.
 
-    The link runs from here to the user rather than from the user to here: a
-    foreign key can only point at one table, and a user column holding either
-    a TR_ or an ST_ id could never be one.
+    **Name and phone are deliberately not here.** They are on `users`, where
+    signing in already reads them, and they are served with this profile by
+    joining rather than copying. A second copy is a second thing to keep in
+    step, and the failure is a profile that disagrees with the account someone
+    logs in with.
+
+    Every column below is **nullable**. Teacher rows already existed before
+    this profile did, and a sign-up cannot retroactively collect a date of
+    birth — a migration that demanded one could not have run at all.
+    [missing_profile_fields] is how the app knows what is still to ask for.
+
+    The repeating parts are their own tables: [TeacherExperience] because a
+    teacher has several previous schools, and [TeacherSubject] because subjects
+    and teachers are many-to-many. Classes need neither — `classes.teacher_id`
+    already makes one teacher's classes a list.
     """
 
     __tablename__ = "teachers"
@@ -155,7 +170,77 @@ class Teacher(Base):
     user_id: Mapped[str] = mapped_column(
         ForeignKey("users.user_id", ondelete="CASCADE"), unique=True
     )
+
+    date_of_birth: Mapped[date | None] = mapped_column(Date, default=None)
+    highest_qualification: Mapped[str | None] = mapped_column(
+        String(120), default=None
+    )
+    address: Mapped[str | None] = mapped_column(String(500), default=None)
+
+    # Free text rather than a CHECK. The app offers a dropdown, but the set of
+    # answers people give to this is not ours to close, and a constraint here
+    # would turn "something the form does not list" into a 500.
+    relationship_status: Mapped[str | None] = mapped_column(
+        String(32), default=None
+    )
+
+    # Twelve digits, unique — one Aadhaar belongs to one person.
+    #
+    # **Never returned in full by the API.** `TeacherOut` exposes the last four
+    # digits only, because nothing in the app needs the rest and a table of
+    # complete Aadhaar numbers is a serious liability if it is ever read by
+    # someone who should not have it. Storing it at all is worth a deliberate
+    # decision: UIDAI's rules restrict both storing and displaying it.
+    aadhaar_number: Mapped[str | None] = mapped_column(
+        String(12), unique=True, default=None
+    )
+
+    emergency_contact_name: Mapped[str | None] = mapped_column(
+        String(120), default=None
+    )
+    emergency_contact_phone: Mapped[str | None] = mapped_column(
+        String(32), default=None
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    # The fields a complete profile has. Not a CHECK or a NOT NULL: the profile
+    # is filled in over time, and the app asks for what is missing rather than
+    # refusing to store a partial one.
+    PROFILE_FIELDS = (
+        "date_of_birth",
+        "highest_qualification",
+        "address",
+        "relationship_status",
+        "emergency_contact_name",
+        "emergency_contact_phone",
+    )
+
+    @property
+    def missing_profile_fields(self) -> list[str]:
+        """What the profile screen should still ask for.
+
+        Aadhaar is left out on purpose. It is the one field a teacher may
+        reasonably refuse to give, and marking a profile permanently
+        "incomplete" over it would nag them forever for something optional.
+        """
+        return [
+            field
+            for field in self.PROFILE_FIELDS
+            if not getattr(self, field, None)
+        ]
+
+    @property
+    def is_profile_complete(self) -> bool:
+        return not self.missing_profile_fields
+
+    @property
+    def aadhaar_last4(self) -> str | None:
+        """The only part of the Aadhaar number that leaves the server."""
+        if not self.aadhaar_number:
+            return None
+        return self.aadhaar_number[-4:]
 
 
 class OtpCode(Base):
@@ -461,3 +546,63 @@ class Attendance(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TeacherSubject(Base):
+    """Which subjects a teacher teaches. Many-to-many.
+
+    A join table rather than a column on either side: a teacher teaches several
+    subjects and a subject is taught by several teachers, and neither list has
+    a sensible maximum to spread across columns.
+
+    The primary key is the pair, so the same subject cannot be assigned to the
+    same teacher twice — there is no meaningful difference between doing it
+    once and doing it twice, and a duplicate would show up as a repeated row on
+    their profile.
+
+    Assignment is the principal's act, and `assigned_by_user_id` records whose.
+    SET NULL there so the assignment outlives the principal who made it.
+    """
+
+    __tablename__ = "teacher_subjects"
+
+    teacher_id: Mapped[str] = mapped_column(
+        ForeignKey("teachers.teacher_id", ondelete="CASCADE"), primary_key=True
+    )
+    subject_id: Mapped[str] = mapped_column(
+        ForeignKey("subjects.subject_id", ondelete="CASCADE"), primary_key=True
+    )
+
+    assigned_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.user_id", ondelete="SET NULL"), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TeacherExperience(Base):
+    """One previous post on a teacher's record: school, address, years there.
+
+    Its own table because "work experience" is a list — a teacher who taught at
+    three schools has three of these, and three sets of columns on `teachers`
+    would cap it at three and leave two empty for most people.
+
+    Keyed on an integer: a row here is a line on a CV, not something anyone
+    quotes by id.
+
+    `years` is numeric with one decimal place, so "2.5 years" is storable. An
+    integer would have quietly rounded half a school year away, and that is
+    exactly the sort of detail someone put on a form on purpose.
+    """
+
+    __tablename__ = "teacher_experience"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    teacher_id: Mapped[str] = mapped_column(
+        ForeignKey("teachers.teacher_id", ondelete="CASCADE"), index=True
+    )
+
+    school_name: Mapped[str] = mapped_column(String(160))
+    school_address: Mapped[str] = mapped_column(String(500), default="")
+    years: Mapped[Decimal] = mapped_column(Numeric(4, 1))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
