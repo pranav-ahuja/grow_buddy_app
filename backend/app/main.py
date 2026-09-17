@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import engine
 from app.migrations import require_current
-from app.routers import auth, classes
+from app.routers import attendance, auth, classes, subjects
 
 logging.basicConfig(level=logging.INFO)
 
@@ -74,3 +74,5 @@ def health() -> dict[str, str]:
 
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(classes.router, prefix=settings.api_prefix)
+app.include_router(subjects.router, prefix=settings.api_prefix)
+app.include_router(attendance.router, prefix=settings.api_prefix)

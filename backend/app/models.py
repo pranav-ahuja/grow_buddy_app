@@ -339,3 +339,125 @@ class Student(Base):
     guardian_address: Mapped[str] = mapped_column(String(500), default="")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# Attendance is recorded one character at a time, as the requirement states:
+# P for present, A for absent. Kept as the stored values rather than a boolean
+# so a third state — 'L' for late, say — is a CHECK change and not a column
+# type change.
+ATTENDANCE_PRESENT = "P"
+ATTENDANCE_ABSENT = "A"
+
+# A subject proposed by a teacher waits for the principal; one the principal
+# adds is approved the moment it exists.
+SUBJECT_PENDING = "pending"
+SUBJECT_APPROVED = "approved"
+
+
+class Subject(Base):
+    """A subject that can be taught. S_000001.
+
+    School-wide, not per class or per teacher: "Mathematics" is one subject
+    that many classes have, so the name is unique across the school
+    (case-insensitively, like class names are per teacher).
+
+    **Two ways in, and that is the point.** The principal adds a subject and it
+    is approved immediately. A teacher may also propose one, which lands as
+    `pending` and does nothing until the principal approves it — the two-way
+    check the requirements ask for. `status` is what separates the two, so a
+    proposal is a real row that can be listed and approved rather than a
+    message that has to be kept somewhere else.
+
+    Note the id prefix is `S`, while a student's is `ST`. They cannot collide —
+    `codes.number_in_code` matches the prefix exactly, so "ST_000001" is not a
+    subject id — but `S_000001` and `ST_000001` do read alike to a person.
+    """
+
+    __tablename__ = "subjects"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ('{SUBJECT_PENDING}', '{SUBJECT_APPROVED}')",
+            name="ck_subjects_status",
+        ),
+        # One "Mathematics" per school, however it was capitalised. Checked in
+        # the router first for a readable message; this is what holds when two
+        # teachers propose the same subject at the same moment.
+        Index("uq_subjects_name", func.lower(text("name")), unique=True),
+    )
+
+    subject_id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    uuid: Mapped[uuid_lib.UUID] = mapped_column(
+        Uuid, unique=True, default=_new_uuid
+    )
+    name: Mapped[str] = mapped_column(String(80))
+
+    status: Mapped[str] = mapped_column(String(16), default=SUBJECT_APPROVED)
+
+    # The teacher who proposed it, when one did. Null for a subject the
+    # principal added directly.
+    #
+    # SET NULL rather than CASCADE — the only place in this schema that is not
+    # a cascade. A teacher leaving the school must not take the school's
+    # subject list with them; "who proposed Mathematics" is history, and losing
+    # the answer is much better than losing the subject.
+    proposed_by_teacher_id: Mapped[str | None] = mapped_column(
+        ForeignKey("teachers.teacher_id", ondelete="SET NULL"), default=None
+    )
+
+    # Which principal approved it, and when. Null while pending.
+    approved_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.user_id", ondelete="SET NULL"), default=None
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Attendance(Base):
+    """One student, one day, present or absent.
+
+    Keyed on an integer rather than a readable code: nobody quotes an
+    attendance row the way they quote a student id, and there is one per pupil
+    per school day — the counter table would be doing a lot of work for an id
+    no one ever reads.
+
+    `(student_id, date)` is unique, so a class cannot end up with two
+    contradicting marks for the same child on the same day. Re-marking is an
+    update, because a teacher correcting a mistake is the normal case, not an
+    error.
+
+    `class_id` is stored even though a student already has one. It records the
+    class the mark was taken in, so moving a pupil to another class later
+    cannot silently rewrite where they were last term.
+
+    `teacher_id` is who took it — SET NULL rather than CASCADE for the same
+    reason as Subject.proposed_by_teacher_id: a teacher leaving must not delete
+    the school's attendance history.
+    """
+
+    __tablename__ = "attendance"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ('{ATTENDANCE_PRESENT}', '{ATTENDANCE_ABSENT}')",
+            name="ck_attendance_status",
+        ),
+        Index("uq_attendance_student_date", "student_id", "date", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    student_id: Mapped[str] = mapped_column(
+        ForeignKey("students.student_id", ondelete="CASCADE"), index=True
+    )
+    class_id: Mapped[str] = mapped_column(
+        ForeignKey("classes.class_id", ondelete="CASCADE"), index=True
+    )
+    teacher_id: Mapped[str | None] = mapped_column(
+        ForeignKey("teachers.teacher_id", ondelete="SET NULL"), default=None
+    )
+
+    date: Mapped[date] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(1))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

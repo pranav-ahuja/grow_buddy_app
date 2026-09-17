@@ -8,6 +8,8 @@ from app.models import (
     ACCOUNT_TYPE_PRINCIPAL,
     ACCOUNT_TYPE_STUDENT,
     ACCOUNT_TYPE_TEACHER,
+    ATTENDANCE_ABSENT,
+    ATTENDANCE_PRESENT,
 )
 from app.security import MAX_PASSWORD_BYTES
 
@@ -423,3 +425,104 @@ class RosterEntry(BaseModel):
     roll_number: int
     student_name: str
     student_id: str
+
+
+# --- Subjects ----------------------------------------------------------------
+
+
+class SubjectCreateRequest(BaseModel):
+    """Adding a subject, or proposing one.
+
+    The same body either way — who is asking decides whether the result is
+    approved or pending, not anything in the request. A teacher cannot ask for
+    their proposal to arrive pre-approved because there is no field to ask with.
+    """
+
+    name: str = Field(min_length=1, max_length=80)
+
+    @field_validator("name")
+    @classmethod
+    def _clean(cls, value: str) -> str:
+        cleaned = _clean_text(value)
+        if not cleaned:
+            raise ValueError("Subject name cannot be blank")
+        return cleaned
+
+
+class SubjectOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    subject_id: str
+    name: str
+
+    # 'approved' or 'pending'. A pending subject is a teacher's proposal that
+    # the principal has not acted on; nothing should be taught against it yet.
+    status: str
+
+    proposed_by_teacher_id: str | None
+    approved_by_user_id: str | None
+    approved_at: datetime | None
+    created_at: datetime
+
+    # Joined in by the list endpoint, so a principal reviewing proposals can
+    # see who made them without a second request per row.
+    proposed_by_name: str | None = None
+
+
+# --- Attendance --------------------------------------------------------------
+
+
+class AttendanceEntry(BaseModel):
+    """One pupil's mark, inside a whole register."""
+
+    student_id: str = Field(min_length=1, max_length=16)
+    status: str = Field(min_length=1, max_length=1)
+
+    @field_validator("status")
+    @classmethod
+    def _known_status(cls, value: str) -> str:
+        mark = value.strip().upper()
+        if mark not in (ATTENDANCE_PRESENT, ATTENDANCE_ABSENT):
+            raise ValueError("status must be 'P' (present) or 'A' (absent)")
+        return mark
+
+
+class AttendanceMarkRequest(BaseModel):
+    """A whole register: one class, one day, a mark per pupil.
+
+    The register is taken in one request rather than one per child. A class of
+    thirty would otherwise be thirty round trips, any of which could fail and
+    leave the day half-marked — and a half-marked day reads as "the rest were
+    absent", which is a different and much worse claim than "not taken yet".
+    """
+
+    class_id: str = Field(min_length=1, max_length=16)
+    date: date
+    entries: list[AttendanceEntry] = Field(min_length=1)
+
+    @field_validator("date")
+    @classmethod
+    def _not_in_the_future(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("Attendance cannot be taken for a future date")
+        return value
+
+    @model_validator(mode="after")
+    def _one_mark_per_pupil(self) -> "AttendanceMarkRequest":
+        seen = [entry.student_id for entry in self.entries]
+        if len(set(seen)) != len(seen):
+            raise ValueError("The same student appears twice in this register")
+        return self
+
+
+class AttendanceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    student_id: str
+    class_id: str
+    teacher_id: str | None
+    date: date
+    status: str
+
+    # Joined in so a register reads as names rather than ids.
+    student_name: str | None = None

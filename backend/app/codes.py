@@ -25,7 +25,13 @@ TEACHER = "TR"
 CLASS = "CL"
 STUDENT = "ST"
 
-ALL_PREFIXES = (USER, TEACHER, CLASS, STUDENT)
+# The subject prefix is a bare "S" while a student is "ST". They cannot
+# collide — number_in_code matches the prefix exactly, so "ST_000001" is not a
+# subject id — but they do read alike, so prefer the full word in any message a
+# person will see.
+SUBJECT = "S"
+
+ALL_PREFIXES = (USER, TEACHER, CLASS, STUDENT, SUBJECT)
 
 # ST_000001 rather than ST_001: three digits run out at 999, and student ids
 # count every student on the platform, not one teacher's. Six also keeps the

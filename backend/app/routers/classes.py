@@ -4,12 +4,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import codes
-from app.accounts import ensure_teacher
+from app.access import (
+    owned_class,
+    readable_class,
+    reader_scope,
+    require_teacher,
+)
 from app.database import class_roster
 from app.deps import CurrentUser, DbSession
 from app.models import (
-    ROLE_PRINCIPAL,
-    ROLE_TEACHER,
     SchoolClass,
     Student,
     Teacher,
@@ -39,79 +42,6 @@ _SAME_CHILD_EXACT = (
     "father_mobile",
 )
 
-
-def _current_teacher(db: Session, user: User) -> Teacher:
-    """The teacher profile behind this request — for anything that needs an
-    *owner*.
-
-    A class belongs to a teacher, so creating, renaming, recolouring or
-    deleting one is a teacher's act. The principal is refused here on purpose
-    and told why: they see every class (see [_reader_scope]) and will later
-    assign teachers to them, but they do not own one.
-    """
-    if user.role == ROLE_PRINCIPAL:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            detail=(
-                "A class is created and edited by the teacher who owns it. "
-                "A principal can see every class but does not own one."
-            ),
-        )
-    if user.role != ROLE_TEACHER:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, detail="Only teachers can manage classes"
-        )
-    return ensure_teacher(db, user)
-
-
-def _reader_scope(db: Session, user: User) -> Teacher | None:
-    """Who this request is allowed to *read*, as a scope.
-
-    Returns the teacher to filter by, or **None meaning school-wide** — which
-    is the principal, whose whole job needs every class and every student.
-
-    None rather than a separate branch at each call site so the scope is
-    decided once, here, by role. The filter is then either applied or not; a
-    caller cannot accidentally read school-wide because it forgot to narrow.
-    """
-    if user.role == ROLE_PRINCIPAL:
-        return None
-    return _current_teacher(db, user)
-
-
-def _readable_class(db: Session, user: User, class_id: str) -> SchoolClass:
-    """One class, if this user is allowed to see it.
-
-    A teacher's own, or any class at all for the principal. Reported as 404
-    rather than 403 when it is somebody else's, so the endpoint cannot be used
-    to discover which ids exist.
-    """
-    teacher = _reader_scope(db, user)
-
-    if teacher is None:
-        school_class = db.get(SchoolClass, class_id)
-        if school_class is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Class not found")
-        return school_class
-
-    return _owned_class(db, teacher, class_id)
-
-
-def _owned_class(db: Session, teacher: Teacher, class_id: str) -> SchoolClass:
-    """The class, if it belongs to this teacher.
-
-    Someone else's class is reported as missing rather than forbidden, so the
-    endpoint cannot be used to discover which ids exist.
-    """
-    school_class = db.scalar(
-        select(SchoolClass).where(
-            SchoolClass.class_id == class_id,
-            SchoolClass.teacher_id == teacher.teacher_id,
-        )
-    )
-    if school_class is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Class not found")
-    return school_class
 
 
 def _reject_duplicate_name(
@@ -216,7 +146,7 @@ def _classes_out(db: Session, *conditions) -> list[ClassOut]:
 @router.get("/classes", response_model=list[ClassOut])
 def list_classes(user: CurrentUser, db: DbSession) -> list[ClassOut]:
     """A teacher's own classes — or, for the principal, every class there is."""
-    teacher = _reader_scope(db, user)
+    teacher = reader_scope(db, user)
 
     if teacher is None:
         return _classes_out(db)
@@ -235,7 +165,7 @@ def create_class(
     followed by student creates, a dropped connection between them would leave
     an empty class on every device and the students nowhere.
     """
-    teacher = _current_teacher(db, user)
+    teacher = require_teacher(db, user)
     _reject_duplicate_name(db, teacher, payload.name)
 
     school_class = SchoolClass(
@@ -296,8 +226,8 @@ def update_class(
     user: CurrentUser,
     db: DbSession,
 ) -> SchoolClass:
-    teacher = _current_teacher(db, user)
-    school_class = _owned_class(db, teacher, class_id)
+    teacher = require_teacher(db, user)
+    school_class = owned_class(db, teacher, class_id)
 
     if payload.name is not None:
         _reject_duplicate_name(db, teacher, payload.name, ignore_id=class_id)
@@ -312,8 +242,8 @@ def update_class(
 
 @router.delete("/classes/{class_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_class(class_id: str, user: CurrentUser, db: DbSession) -> Response:
-    teacher = _current_teacher(db, user)
-    school_class = _owned_class(db, teacher, class_id)
+    teacher = require_teacher(db, user)
+    school_class = owned_class(db, teacher, class_id)
 
     # Explicit rather than left to ON DELETE CASCADE. PostgreSQL would honour
     # the cascade, but SQLite — which the test suite runs on — ignores foreign
@@ -328,7 +258,7 @@ def delete_class(class_id: str, user: CurrentUser, db: DbSession) -> Response:
 @router.get("/classes/{class_id}/roster", response_model=list[RosterEntry])
 def class_roster_for(class_id: str, user: CurrentUser, db: DbSession) -> list:
     """The class as a table: class id, class name, roll number, student name."""
-    _readable_class(db, user, class_id)
+    readable_class(db, user, class_id)
     return list(
         db.execute(
             select(class_roster)
@@ -345,7 +275,7 @@ def class_roster_for(class_id: str, user: CurrentUser, db: DbSession) -> list:
 def list_students(user: CurrentUser, db: DbSession) -> list[StudentOut]:
     # Every student at once rather than per class: the dashboard shows a count
     # on every tile, so it needs them all anyway, and one request beats nine.
-    teacher = _reader_scope(db, user)
+    teacher = reader_scope(db, user)
 
     # The principal has access to every student in the school — one of the
     # things the role is for.
@@ -364,7 +294,7 @@ def create_student(
     # any class in the school; a teacher only into one of their own. A class id
     # from someone else's account is not a class this student can be filed
     # under.
-    school_class = _readable_class(db, user, payload.class_id)
+    school_class = readable_class(db, user, payload.class_id)
 
     existing = _same_child(db, school_class.class_id, payload)
     if existing is not None:
