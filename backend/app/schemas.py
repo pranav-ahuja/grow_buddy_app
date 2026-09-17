@@ -4,12 +4,25 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.models import ACCOUNT_TYPE_STUDENT, ACCOUNT_TYPE_TEACHER
+from app.models import (
+    ACCOUNT_TYPE_PRINCIPAL,
+    ACCOUNT_TYPE_STUDENT,
+    ACCOUNT_TYPE_TEACHER,
+)
 from app.security import MAX_PASSWORD_BYTES
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE_CLEANUP_RE = re.compile(r"[\s\-()]")
 _PHONE_RE = re.compile(r"^\+?\d{7,15}$")
+
+# Every account_type the API accepts. One tuple rather than the same three-way
+# comparison written out at each validator, so adding a fourth role later is a
+# single edit and cannot be half-applied.
+KNOWN_ACCOUNT_TYPES = (
+    ACCOUNT_TYPE_TEACHER,
+    ACCOUNT_TYPE_STUDENT,
+    ACCOUNT_TYPE_PRINCIPAL,
+)
 
 
 def normalize_phone(raw: str) -> str:
@@ -120,8 +133,10 @@ class ProfileUpdateRequest(BaseModel):
     def _known_account_type(cls, value: int | None) -> int | None:
         if value is None:
             return None
-        if value not in (ACCOUNT_TYPE_TEACHER, ACCOUNT_TYPE_STUDENT):
-            raise ValueError("account_type must be 0 (teacher) or 1 (student)")
+        if value not in KNOWN_ACCOUNT_TYPES:
+            raise ValueError(
+                "account_type must be 0 (teacher), 1 (student) or 2 (principal)"
+            )
         return value
 
     @model_validator(mode="after")
@@ -159,8 +174,10 @@ class SignUpRequest(BaseModel):
     @field_validator("account_type")
     @classmethod
     def _known_account_type(cls, value: int) -> int:
-        if value not in (ACCOUNT_TYPE_TEACHER, ACCOUNT_TYPE_STUDENT):
-            raise ValueError("account_type must be 0 (teacher) or 1 (student)")
+        if value not in KNOWN_ACCOUNT_TYPES:
+            raise ValueError(
+                "account_type must be 0 (teacher), 1 (student) or 2 (principal)"
+            )
         return value
 
 

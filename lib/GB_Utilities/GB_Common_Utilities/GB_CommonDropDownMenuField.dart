@@ -19,16 +19,23 @@ class DropDownTextFieldMenu extends StatelessWidget {
           borderRadius: BorderRadius.circular(50.0),
         ),
       ),
-      dropdownMenuEntries: const [
-        DropdownMenuEntry(value: "Teacher", label: "Teacher"),
-        DropdownMenuEntry(value: "Student", label: "Student"),
+      // Built from kAccountTypeOptions rather than listed here, so a role
+      // added there appears on every picker at once.
+      dropdownMenuEntries: [
+        for (final GB_AccountTypeOption option in kAccountTypeOptions)
+          DropdownMenuEntry<String>(
+            value: option.label,
+            label: option.label,
+            leadingIcon: Icon(option.icon),
+          ),
       ],
       label: const Text("Account Type"),
       onSelected: (value) {
-        if (value == "Teacher") {
-          onAccountTypeChanged(accountTypeTeacher);
-        } else if (value == "Student") {
-          onAccountTypeChanged(accountTypeStudent);
+        for (final GB_AccountTypeOption option in kAccountTypeOptions) {
+          if (option.label == value) {
+            onAccountTypeChanged(option.value);
+            return;
+          }
         }
       },
     );

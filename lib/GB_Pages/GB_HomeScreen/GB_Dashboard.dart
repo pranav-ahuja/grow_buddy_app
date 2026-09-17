@@ -27,19 +27,40 @@ class GB_Dashboard extends StatelessWidget {
   /// A user with neither should have been sent to `GB_CompleteProfile` before
   /// reaching here; if one slips through, the student screen is the safer
   /// landing of the two — it shows nothing a teacher-only account could act on.
-  bool _isTeacher(GB_User? user) {
-    if (user == null) return false;
+  /// Which of the three dashboards this user belongs on.
+  ///
+  /// `role` is the answer when the backend has one. It stays null until an
+  /// account type is chosen, so [GB_User.accountType] is the fallback — and a
+  /// user with neither should have been sent to `GB_CompleteProfile` before
+  /// reaching here.
+  static int? _accountType(GB_User? user) {
+    if (user == null) return null;
 
     final String? role = user.role?.toLowerCase();
-    if (role != null && role.isNotEmpty) return role == "teacher";
-
-    return user.accountType == accountTypeTeacher;
+    return switch (role) {
+      "teacher" => accountTypeTeacher,
+      "student" => accountTypeStudent,
+      "principal" => accountTypePrincipal,
+      // Null or unrecognised: fall back to the number, which is the same
+      // answer by another name.
+      _ => user.accountType,
+    };
   }
 
   @override
   Widget build(BuildContext context) {
-    return _isTeacher(gCurrentUser)
-        ? const GB_TeacherDashboard()
-        : const GB_StudentDashboard();
+    // The principal shares the teacher's dashboard for now. Phase 2 splits
+    // them: this screen becomes the principal's, and the teacher gets a
+    // narrower one without the fee status. Pointing the principal at it here
+    // rather than later means the role is usable the moment it exists, instead
+    // of landing a brand-new principal on the student placeholder.
+    return switch (_accountType(gCurrentUser)) {
+      accountTypeTeacher => const GB_TeacherDashboard(),
+      accountTypePrincipal => const GB_TeacherDashboard(),
+      // Everything else, including a user with no role at all, gets the
+      // student screen: it is the safer landing of the three, showing nothing
+      // a teacher-only or admin-only account could act on.
+      _ => const GB_StudentDashboard(),
+    };
   }
 }

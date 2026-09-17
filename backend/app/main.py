@@ -7,7 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.database import create_schema, engine
+from app.database import engine
+from app.migrations import require_current
 from app.routers import auth, classes
 
 logging.basicConfig(level=logging.INFO)
@@ -25,9 +26,9 @@ async def lifespan(app: FastAPI):
             "response and printed below. Development only."
         )
 
-    # Fine while the schema is small and changing daily. Switch to Alembic
-    # migrations before there is production data worth keeping.
-    create_schema(engine)
+    # The schema is Alembic's now. This only checks; it never migrates — see
+    # app/migrations.py for why applying one stays a command someone runs.
+    require_current(engine)
     yield
 
 

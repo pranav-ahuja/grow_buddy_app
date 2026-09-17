@@ -189,8 +189,63 @@ const double kElevatedButtonIconSize = 30.0;
 const double kEvelatedButtonPadding = 8.0;
 
 //Account Type
+// These integers are the API's `account_type`, and they are mirrored in the
+// backend's app/models.py. The backend maps them to the role text it stores
+// ('teacher' / 'student' / 'principal'); the numbers themselves are written
+// into every existing row, so they are append-only — never renumber them.
 const int accountTypeTeacher = 0;
 const int accountTypeStudent = 1;
+
+/// The principal, who is the school's admin.
+const int accountTypePrincipal = 2;
+
+/// One choosable account type: the number the API wants, the word the user
+/// reads, and the icon beside it.
+class GB_AccountTypeOption {
+  const GB_AccountTypeOption({
+    required this.value,
+    required this.label,
+    required this.icon,
+  });
+
+  final int value;
+  final String label;
+  final IconData icon;
+}
+
+/// Every account type a person can pick, in the order they are offered.
+///
+/// One list rather than the same three choices restated in each picker. Before
+/// this, the roles were written out separately in `GB_SignUp`, in
+/// `DropDownTextFieldMenu`, and in `GB_CompleteProfile` — so adding the
+/// principal meant three edits that could each be forgotten, and a role
+/// missing from one screen is invisible until someone tries to sign up on it.
+const List<GB_AccountTypeOption> kAccountTypeOptions = [
+  GB_AccountTypeOption(
+    value: accountTypeTeacher,
+    label: "Teacher",
+    icon: Icons.school_outlined,
+  ),
+  GB_AccountTypeOption(
+    value: accountTypeStudent,
+    label: "Student",
+    icon: Icons.backpack_outlined,
+  ),
+  GB_AccountTypeOption(
+    value: accountTypePrincipal,
+    label: "Principal",
+    icon: Icons.admin_panel_settings_outlined,
+  ),
+];
+
+/// The label for an account type, for anywhere one has to be shown back to the
+/// user. Null when the role was never chosen.
+String? gAccountTypeLabel(int? value) {
+  for (final GB_AccountTypeOption option in kAccountTypeOptions) {
+    if (option.value == value) return option.label;
+  }
+  return null;
+}
 
 //Google Sign-In
 // Both come from Google Cloud Console -> APIs & Services -> Credentials, and

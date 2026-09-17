@@ -25,12 +25,19 @@ from app.timeutils import utcnow
 ACCOUNT_TYPE_TEACHER = 0
 ACCOUNT_TYPE_STUDENT = 1
 
+# The principal, who is this school's admin. Added as 2 rather than renumbering:
+# 0 and 1 are already written into every existing row and into the app's
+# GB_Constants.dart, and shifting them would silently re-role every account.
+ACCOUNT_TYPE_PRINCIPAL = 2
+
 ROLE_TEACHER = "teacher"
 ROLE_STUDENT = "student"
+ROLE_PRINCIPAL = "principal"
 
 ACCOUNT_TYPE_TO_ROLE = {
     ACCOUNT_TYPE_TEACHER: ROLE_TEACHER,
     ACCOUNT_TYPE_STUDENT: ROLE_STUDENT,
+    ACCOUNT_TYPE_PRINCIPAL: ROLE_PRINCIPAL,
 }
 ROLE_TO_ACCOUNT_TYPE = {role: number for number, role in ACCOUNT_TYPE_TO_ROLE.items()}
 
@@ -52,8 +59,8 @@ class IdCounter(Base):
 
 
 class User(Base):
-    """Anyone who can sign in — a teacher, or (once the student portal exists) a
-    parent.
+    """Anyone who can sign in — a teacher, the principal, or (once the student
+    portal exists) a parent on their child's behalf.
 
     Keyed on a readable id, U_000001, with a random UUID alongside it. The
     readable id is what people quote and what other tables point at; the UUID is
@@ -69,7 +76,8 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint(
-            f"role IN ('{ROLE_TEACHER}', '{ROLE_STUDENT}')", name="ck_users_role"
+            f"role IN ('{ROLE_TEACHER}', '{ROLE_STUDENT}', '{ROLE_PRINCIPAL}')",
+            name="ck_users_role",
         ),
     )
 
@@ -101,8 +109,9 @@ class User(Base):
         String(255), unique=True, index=True, default=None
     )
 
-    # 'teacher' or 'student', lower case. Null until chosen: Google and phone
-    # sign-ins cannot tell us which, so the app asks afterwards.
+    # 'teacher', 'student' or 'principal', lower case. Null until chosen:
+    # Google and phone sign-ins cannot tell us which, so the app asks
+    # afterwards.
     role: Mapped[str | None] = mapped_column(String(16), default=None)
 
     is_phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
