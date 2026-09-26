@@ -33,7 +33,7 @@ class GB_StudentStore {
   ///
   /// Throws [GB_ApiException] if the server refuses — including a 409 when the
   /// same child is already in the class — leaving the local copy untouched.
-  static Future<GB_Student> addStudent({
+  static Future<GB_ActionResult> addStudent({
     required String name,
     required DateTime dateOfBirth,
     required String gender,
@@ -44,7 +44,7 @@ class GB_StudentStore {
     GB_StudentContact? father,
     GB_StudentContact? guardian,
   }) async {
-    final GB_Student created = await GB_ClassApi.createStudent(
+    final GB_ActionResult result = await GB_ClassApi.createStudent(
       token: gRequireToken(),
       student: GB_Student(
         name: name.trim(),
@@ -60,6 +60,12 @@ class GB_StudentStore {
       ),
     );
 
+    // Nothing local changes on a pending request: the pupil is not registered
+    // until the principal says so, and a count that included them would be
+    // counting a child who is not on any register.
+    final GB_Student? created = result.student;
+    if (created == null) return result;
+
     try {
       await load();
     } on Exception {
@@ -68,7 +74,34 @@ class GB_StudentStore {
       // catch up on the next load.
       students.value = [...students.value, created];
     }
-    return created;
+    return result;
+  }
+
+  /// Removes a pupil on the server, or asks the principal to.
+  ///
+  /// Reloads on success rather than dropping the one row, for the same reason
+  /// [addStudent] does: roll numbers are alphabetical, so a pupil leaving
+  /// moves every classmate after them up one, and only the server's list has
+  /// all of those right.
+  static Future<GB_ActionResult> removeStudent(String studentId) async {
+    final GB_ActionResult result = await GB_ClassApi.deleteStudent(
+      token: gRequireToken(),
+      studentId: studentId,
+    );
+
+    if (!result.isDone) return result;
+
+    try {
+      await load();
+    } on Exception {
+      // The pupil is gone on the server; only the refresh failed. Dropping
+      // them locally keeps this device honest — the classmates' roll numbers
+      // catch up on the next load.
+      students.value = students.value
+          .where((GB_Student student) => student.studentId != studentId)
+          .toList();
+    }
+    return result;
   }
 
   /// The students in one class, in roll-number order.

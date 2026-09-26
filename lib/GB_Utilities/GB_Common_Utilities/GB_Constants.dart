@@ -182,6 +182,12 @@ const TextStyle kH2TextStyle = TextStyle(
 //OTP Constants
 const double kOtpDigitTextSize = 26.0;
 
+// How long GB_Verify keeps 'Resend Code' disabled. Mirrors the backend's
+// OTP_RESEND_COOLDOWN_SECONDS in app/routers/auth.py -- if they disagree the
+// button goes live before the server will accept a resend, and the user gets
+// a rejection they did nothing to earn.
+const int kOtpResendCooldownSeconds = 30;
+
 //Elevated button Constants
 const double kElevatedButtonVerticalPadding = 10.0;
 const double kElevatedButtonTextSize = 18.0;
@@ -266,7 +272,25 @@ const String kGoogleIosClientId = "";
 //   Android emulator      -> http://10.0.2.2:8080
 //   iOS simulator/desktop -> http://127.0.0.1:8080
 //   Physical device       -> http://<your-computer-LAN-IP>:8080
-const String kApiBaseUrl = 'http://192.168.0.157:8080';
+//   Anywhere, any network -> https://<machine>.<tailnet>.ts.net   (Tailscale)
+//
+// The default below is this machine's LAN address, which only reaches the
+// backend while the phone is on the same Wi-Fi. Rather than editing this line
+// for every network, override it at build time:
+//
+//   flutter run --dart-define=GB_API_BASE_URL=https://<machine>.<tailnet>.ts.net
+//
+// `tool/gb_tailscale_serve.ps1` starts the Tailscale proxy and prints that
+// command with the real hostname filled in. The Tailscale form carries no port
+// (serve listens on 443) and needs no network_security_config entry, because it
+// is real HTTPS with a Let's Encrypt certificate rather than cleartext.
+//
+// `String.fromEnvironment` is a const constructor, so everything below stays a
+// compile-time constant either way.
+const String kApiBaseUrl = String.fromEnvironment(
+  'GB_API_BASE_URL',
+  defaultValue: 'http://192.168.0.157:8080',
+);
 const String kApiPrefix = '$kApiBaseUrl/api/v1';
 
 const String kSignUpUrl = '$kApiPrefix/auth/signup';
@@ -282,3 +306,20 @@ const String kMeUrl = '$kApiPrefix/auth/me';
 // the same classes on every device.
 const String kClassesUrl = '$kApiPrefix/classes';
 const String kStudentsUrl = '$kApiPrefix/students';
+
+// Both are role-scoped on the server: /students answers a teacher with their
+// own pupils, the principal with the whole school, and a parent with their own
+// children. The app sends no filter of its own, so it cannot get that filter
+// wrong — which matters, because what is being filtered is other people's
+// children.
+const String kAttendanceUrl = '$kApiPrefix/attendance';
+const String kSubjectsUrl = '$kApiPrefix/subjects';
+const String kTeachersUrl = '$kApiPrefix/teachers';
+
+/// The approval queue. A teacher's create/delete of a class, and their adding
+/// or removing a pupil, land here as requests for the principal to answer;
+/// see the backend's app/approvals.py.
+const String kRequestsUrl = '$kApiPrefix/requests';
+
+/// The notification tab — each account's own notices plus every broadcast.
+const String kNotificationsUrl = '$kApiPrefix/notifications';

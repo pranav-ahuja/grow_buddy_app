@@ -8,6 +8,10 @@ import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Butt
 import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_TextButton.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_SignUp.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_Login.dart';
+import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
+import 'package:colorful_iconify_flutter/icons/logos.dart';
+import 'package:iconify_flutter/icons/material_symbols.dart';
 
 class GB_MobileLogin extends StatefulWidget {
   const GB_MobileLogin({super.key});
@@ -133,6 +137,40 @@ class _GB_MobileLoginState extends State<GB_MobileLogin> {
                   elevatedButtonFontWeight: FontWeight.w500,
                   elevatedButtonTextSize: kElevatedButtonTextSize,
                   onPressed: isSubmitting ? null : _requestOtp,
+                ),
+              ),
+              // This is the default login page, so the other two ways in have
+              // to be reachable from here — otherwise a Google or
+              // email/password account has no route back. Mirrors the row on
+              // GB_Login, with the phone icon swapped for the @ that leads to
+              // the password form.
+              Padding(
+                padding: const EdgeInsets.only(top: 20.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    GB_ElevatedButtonIcons(
+                      elevatedButtonIcon: Logos.google_icon,
+                      elevatedButtonIconSize: kElevatedButtonIconSize,
+                      elevatedButtonPadding: kEvelatedButtonPadding,
+                      onPressed: isSubmitting
+                          ? null
+                          : () => gSignInWithGoogle(context),
+                    ),
+                    GB_ElevatedButtonIcons(
+                      elevatedButtonIcon: MaterialSymbols.alternate_email,
+                      elevatedButtonIconSize: kElevatedButtonIconSize,
+                      elevatedButtonPadding: kEvelatedButtonPadding,
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => GB_Login(),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
               ),
               Padding(

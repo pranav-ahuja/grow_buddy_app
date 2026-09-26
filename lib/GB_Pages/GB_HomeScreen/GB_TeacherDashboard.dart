@@ -8,8 +8,16 @@ import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeDashboard.dart';
 /// ([GB_PrincipalDashboard]); the shared body moved to [GB_HomeDashboard] and
 /// both roles are configurations of it.
 ///
-/// What a teacher gets: their own classes, which they may add to and delete
-/// from, the register-student action, and a three-tab bar.
+/// What a teacher gets: the classes they take — the ones they own **and the
+/// ones the principal added them to as a co-teacher** — the register-student
+/// action, and a three-tab bar.
+///
+/// They may still start an add or a delete, and register or remove a pupil.
+/// Since 2026-09-20 all four **ask the principal** rather than taking effect:
+/// what comes back is a request, nothing else changes until it is granted,
+/// and the answer arrives behind the app bar's bell. The screen does not
+/// encode that rule — the server decides it from who is asking and says which
+/// happened, and this list would only be a second copy to keep in step.
 ///
 /// What a teacher does **not** get is the **Fee** tab. Fee status is the
 /// principal's, so it is absent rather than present and refusing — a tab whose

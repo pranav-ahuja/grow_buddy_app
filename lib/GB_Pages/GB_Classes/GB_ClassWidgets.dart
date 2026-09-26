@@ -63,10 +63,19 @@ class GB_ClassRowCard extends StatelessWidget {
     super.key,
     required this.child,
     this.onTap,
+    this.onLongPress,
   });
 
   final Widget child;
   final VoidCallback? onTap;
+
+  /// The card's secondary action, where it has one.
+  ///
+  /// Long press rather than a second visible control: these cards are 96pt
+  /// wide in a horizontal strip, and the only thing behind this today is
+  /// removing a pupil — which is irreversible and should not sit a few pixels
+  /// from "open".
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +84,7 @@ class GB_ClassRowCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(kFeatureCardRadius),
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(kFeatureCardRadius),
         child: Container(
           width: kFeatureCardWidth,
@@ -151,15 +161,22 @@ class GB_StudentCard extends StatelessWidget {
     super.key,
     required this.student,
     this.onTap,
+    this.onLongPress,
   });
 
   final GB_Student student;
   final VoidCallback? onTap;
 
+  /// Held down to remove the pupil — or, for a teacher, to ask the principal
+  /// to. Null where the viewer may do neither, which draws no action at all
+  /// rather than one that refuses.
+  final VoidCallback? onLongPress;
+
   @override
   Widget build(BuildContext context) {
     return GB_ClassRowCard(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,

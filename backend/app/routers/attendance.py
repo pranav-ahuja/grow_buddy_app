@@ -16,7 +16,13 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.access import readable_class, require_teacher
+from app.access import (
+    guardian_student_ids,
+    is_guardian,
+    readable_class,
+    readable_student,
+    require_teacher,
+)
 from app.deps import CurrentUser, DbSession
 from app.models import Attendance, Student
 from app.schemas import AttendanceMarkRequest, AttendanceOut
@@ -140,8 +146,8 @@ def read_attendance(
     school — a request nobody means to make, and an expensive way to find that
     out.
 
-    Scope is the same as everywhere else: a teacher's own classes, or the whole
-    school for the principal.
+    Scope is the same as everywhere else: a teacher's own classes, the whole
+    school for the principal, and for a parent their own children.
     """
     if class_id is None and student_id is None:
         raise HTTPException(
@@ -151,6 +157,22 @@ def read_attendance(
 
     conditions = []
 
+    # A parent is narrowed to their own children whatever else they asked for.
+    #
+    # Applied up here rather than per-branch on purpose: a parent can reach
+    # their child's class, so asking by `class_id` alone would otherwise return
+    # the whole register — every classmate's name and whether they were absent.
+    # Reaching the class is not permission to read the other children in it.
+    # No early return for a parent with no links: an empty `IN ()` already
+    # matches nothing, and letting the checks below still run keeps one answer
+    # for "not your class" — 404 — whether or not the account has any links at
+    # all. Short-circuiting here made an unlinked parent get 200 [] where a
+    # linked one got 404, for the same question.
+    if is_guardian(user):
+        conditions.append(
+            Attendance.student_id.in_(guardian_student_ids(db, user))
+        )
+
     if class_id is not None:
         # Raises 404 for a class this user may not see, so the filter below can
         # be trusted.
@@ -158,14 +180,10 @@ def read_attendance(
         conditions.append(Attendance.class_id == class_id)
 
     if student_id is not None:
-        student = db.get(Student, student_id)
-        if student is None:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND, detail="Student not found"
-            )
-        # Reached through their class, so a teacher cannot read a pupil who is
-        # not theirs — reported as missing rather than forbidden, like classes.
-        readable_class(db, user, student.class_id)
+        # Staff reach a pupil through the class, a parent directly through the
+        # guardian link. Either way somebody else's child reads as missing
+        # rather than forbidden.
+        readable_student(db, user, student_id)
         conditions.append(Attendance.student_id == student_id)
 
     if date is not None:
@@ -186,11 +204,9 @@ def attendance_summary(
     step with the marks, and it would be wrong the first time a teacher
     corrected a day.
     """
-    student = db.get(Student, student_id)
-    if student is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Student not found")
-
-    readable_class(db, user, student.class_id)
+    # A parent opening the app is the main caller here, so this has to work for
+    # a guardian as well as for staff.
+    student = readable_student(db, user, student_id)
 
     marks = list(
         db.scalars(

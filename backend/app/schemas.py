@@ -1,6 +1,6 @@
 import re
 import uuid as uuid_lib
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -361,20 +361,49 @@ class ClassOut(BaseModel):
     color_slot: int
     created_at: datetime
 
-    # Who owns the class. The principal's dashboard lists every class in the
-    # school, where two teachers each having a "Nursery" is normal — so without
-    # the owner's name that list would be actively misleading.
-    teacher_id: str
+    # The class teacher — the one owner. **Null means unassigned**, which is a
+    # class the principal has created and not yet handed to anyone, not a
+    # broken row. The principal's dashboard lists every class in the school,
+    # where two teachers each having a "Nursery" is normal, so without an
+    # owner's name that list would be actively misleading.
+    teacher_id: str | None = None
 
     # Joined in by the list endpoint only. Optional, so the routes that return
     # the ORM object straight back (create, update) still validate: there is no
     # such attribute on SchoolClass, and the default fills in.
     teacher_name: str | None = None
 
+    # Everyone who teaches this class, the class teacher first. Filled by the
+    # endpoints the class screen uses; empty elsewhere rather than absent, so
+    # the app never has to distinguish "no co-teachers" from "not asked".
+    teachers: list["ClassTeacherOut"] = Field(default_factory=list)
+
+
+class ClassTeacherOut(BaseModel):
+    """One teacher on a class, as the class screen and its picker read them."""
+
+    teacher_id: str
+    full_name: str
+
+    # True for the one in `classes.teacher_id`. The picker highlights all of
+    # them alike, but the class screen names the class teacher first and the
+    # rest after — a room with two adults still has one who is answerable for
+    # it.
+    is_class_teacher: bool = False
+
 
 class ClassCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     color_slot: int = 0
+
+    # The class teacher, **principal only**. Omitted or null creates an
+    # unassigned class, which is the point of the field: an admin setting up
+    # September does not yet know who is taking what.
+    #
+    # A teacher's own request ignores this — their class is theirs, and a
+    # field that let them file one under a colleague would be a way to put
+    # work on somebody else's dashboard.
+    teacher_id: str | None = Field(default=None, max_length=16)
 
     # Empty for an ordinary new class. Filled only by "Restore class", with the
     # students read out of the uploaded class file, so the server can create
@@ -732,3 +761,203 @@ class ClassTeacherAssignRequest(BaseModel):
     """The principal moving a class to a teacher."""
 
     teacher_id: str = Field(min_length=1, max_length=16)
+
+
+# --- Guardians (parent accounts linked to a pupil) ---------------------------
+
+
+class GuardianLinkRequest(BaseModel):
+    """Staff linking a parent's account to a pupil.
+
+    The account is named by email or phone rather than by `U_` id, because
+    that is what a teacher has in front of them from the registration form.
+    """
+
+    identifier: str = Field(min_length=3, max_length=255)
+    relation: str = Field(default="", max_length=32)
+
+    @field_validator("relation")
+    @classmethod
+    def _clean_relation(cls, value: str) -> str:
+        return _clean_text(value)
+
+
+class GuardianOut(BaseModel):
+    user_id: str
+    student_id: str
+
+    full_name: str
+    email: str | None
+    phone: str | None
+    relation: str
+
+    # Whether this account's email or phone is one of the contacts on the
+    # pupil's own record. **Not** a permission check — the link is already
+    # authorised by the staff member who made it. It shows which links the
+    # registration form corroborates and which were typed in from elsewhere; a
+    # parent who changed their number since registering is an ordinary false
+    # negative, which is exactly why it cannot gate anything.
+    matches_registered_contact: bool
+
+    created_at: datetime
+
+
+# --- Teaching assignments -----------------------------------------------------
+
+
+class ClassTeachersAssignRequest(BaseModel):
+    """The principal setting who teaches a class, from the class screen's
+    "Add teacher" picker.
+
+    **The whole set, not a difference.** A screen of names where the chosen
+    ones are highlighted knows what it wants the answer to be; making it send
+    a diff is how an unhighlighted teacher stays assigned. An empty list is a
+    valid answer and means the class is unassigned — the same state a class is
+    created in.
+
+    The **first** id becomes the class teacher (`classes.teacher_id`) and the
+    rest become co-teachers, with one exception: a class that already has a
+    class teacher keeps them, as long as they are still in the set. Without
+    that exception, reordering a list of checkboxes would quietly reassign
+    who is answerable for the room.
+    """
+
+    teacher_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("teacher_ids")
+    @classmethod
+    def _no_duplicates(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("The same teacher is listed twice")
+        return value
+
+
+# --- Approval requests --------------------------------------------------------
+
+
+class ChangeRequestOut(BaseModel):
+    """One row of the approval queue, for either side of it.
+
+    The principal reads a list of these to decide from; the teacher reads
+    their own to see what became of what they asked for. One shape, because
+    they are looking at the same rows.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    kind: str
+    status: str
+
+    # Who asked. The name is the stored copy, so it still reads correctly
+    # after the teacher has left — see ChangeRequest.requested_by_name.
+    requested_by_teacher_id: str | None
+    requested_by_name: str
+
+    # What it is about, where that still exists. Either can be null: a
+    # class_create has no class until it is granted, and a granted
+    # class_delete has none afterwards.
+    class_id: str | None
+    student_id: str | None
+
+    # The one line to decide from: 'removal of the class "Nursery" and its 12
+    # students'. Written when the request was raised, so it describes what was
+    # asked even after the thing it names has gone.
+    summary: str
+
+    decided_by_user_id: str | None
+    decided_at: datetime | None
+    decision_note: str
+    created_at: datetime
+
+    # Deliberately **not** exposed: `payload`. It is the request's private
+    # copy of a register-student form — a child's address and both parents'
+    # numbers — and the queue only ever needs the summary to decide from.
+
+
+class RequestDecisionRequest(BaseModel):
+    """The principal's answer, when turning one down.
+
+    The note is optional but asked for in the UI, because "rejected" with no
+    reason is how a teacher asks again tomorrow in the same words.
+    """
+
+    note: str = Field(default="", max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def _clean_note(cls, value: str) -> str:
+        return _clean_text(value)
+
+
+class ActionResult(BaseModel):
+    """What came of a create or delete — done, or waiting on the principal.
+
+    One shape for all four acts, because who is asking decides which of the
+    two happens and the app should not need a different reader per role. The
+    principal gets `status: "done"` and the thing itself; a teacher gets
+    `status: "pending"` and the request that is now waiting.
+
+    `detail` is the sentence to show. It is written by the server for the same
+    reason every other message here is: the app would otherwise have to
+    reproduce the rule about who needs approval in order to word its own
+    snackbar, and be wrong the moment the rule changes.
+    """
+
+    status: str
+    detail: str
+
+    school_class: ClassOut | None = None
+    student: StudentOut | None = None
+    request: ChangeRequestOut | None = None
+
+
+# --- Notifications ------------------------------------------------------------
+
+
+class NotificationOut(BaseModel):
+    """One line in the notification tab."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+    # Separate, as stored: the tab groups by day and stamps each line with a
+    # clock time. See the Notification model for why they are not one column.
+    date: date
+    time: time
+
+    # Where it came from, in words — a teacher's name, or "GrowBuddy".
+    source: str
+
+    # "user" or "broadcast". Sent so the app can mark a school-wide notice as
+    # such; a broadcast reads differently from something addressed to you.
+    audience: str
+
+    message: str
+
+    # Set where this line is an approval the reader can decide on the spot.
+    # Null for anything that is only news.
+    request_id: int | None
+
+    read_at: datetime | None
+    created_at: datetime
+
+
+class NotificationListOut(BaseModel):
+    """The tab's contents, plus the two numbers its badges need.
+
+    Counted on the server rather than by the app. The unread count has to
+    match what the list would show, and two independent counts of the same
+    thing eventually disagree — usually at the worst moment, when the badge
+    says 3 and the list is empty.
+    """
+
+    notifications: list[NotificationOut]
+
+    # The dot on the bell.
+    unread: int
+
+    # The principal's queue depth, and **zero for everyone else** — a teacher
+    # has no business knowing how many requests the school is sitting on.
+    pending_requests: int

@@ -8,6 +8,8 @@ teacher's own classes, the whole school for the principal.
 
 from datetime import date, timedelta
 
+import helpers
+
 SIGNUP = "/api/v1/auth/signup"
 CLASSES = "/api/v1/classes"
 STUDENTS = "/api/v1/students"
@@ -41,27 +43,22 @@ def signup(client, name: str, email: str, account_type: int) -> str:
 
 
 def make_class(client, token: str, name: str) -> str:
-    response = client.post(
-        CLASSES, json={"name": name, "color_slot": 0}, headers=auth(token)
-    )
-    assert response.status_code == 201, response.text
-    return response.json()["class_id"]
+    """A class belonging to [token]'s teacher.
+
+    Through `helpers`, which creates it as a principal, because a teacher's
+    own POST /classes has been a request for the principal to approve since
+    2026-09-20. These tests are about the register, not about who may make a
+    class — the row that comes out is the same either way.
+    """
+    return helpers.make_class(client, token, name)
 
 
 def add_student(client, token: str, class_id: str, name: str) -> str:
-    response = client.post(
-        STUDENTS,
-        json={
-            "class_id": class_id,
-            "name": name,
-            "date_of_birth": "2021-04-12",
-            "gender": "Female",
-            "address": "12 Rose Lane",
-        },
-        headers=auth(token),
+    """A pupil in [class_id]. Registered by a principal, for the same reason."""
+    student = helpers.add_student(
+        client, helpers.admin_token(client), class_id, name
     )
-    assert response.status_code == 201, response.text
-    return response.json()["student_id"]
+    return student["student_id"]
 
 
 def a_class_of_two(client):
@@ -382,7 +379,13 @@ def test_an_unmarked_pupil_has_no_percentage_rather_than_zero(client):
 
 
 def test_deleting_a_class_takes_its_attendance_with_it(client):
-    """The cascade, which is what keeps orphan marks out of the summaries."""
+    """The cascade, which is what keeps orphan marks out of the summaries.
+
+    Deleted by the principal, and the response is 200 with `status: "done"`
+    rather than the old 204 — a teacher's delete has something to say back
+    now (the request it raised), and one endpoint that sometimes has a body
+    and sometimes does not is worse to consume than one that always does.
+    """
     s = a_class_of_two(client)
     client.post(
         ATTENDANCE,
@@ -394,10 +397,11 @@ def test_deleting_a_class_takes_its_attendance_with_it(client):
         headers=auth(s["asha"]),
     )
 
-    assert (
-        client.delete(f"{CLASSES}/{s['nursery']}", headers=auth(s["asha"])).status_code
-        == 204
+    deleted = client.delete(
+        f"{CLASSES}/{s['nursery']}", headers=auth(s["head"])
     )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["status"] == "done"
 
     # The pupil is gone with the class, so their register is unreachable.
     response = client.get(
@@ -406,11 +410,37 @@ def test_deleting_a_class_takes_its_attendance_with_it(client):
     assert response.status_code == 404
 
 
-def test_a_student_account_reaches_no_registers(client):
+def test_an_unlinked_parent_account_reaches_no_register(client):
+    """Changed in phase 6: 404 now, not 403, and that is the better answer.
+
+    A student account is a parent, and may read the register of a class its
+    child is in. This one has no linked child, so the class it asked for is
+    not a class it can see — reported as missing, exactly like a teacher asking
+    about somebody else's class, so the endpoint cannot be used to find out
+    which class ids exist.
+    """
     pupil = signup(client, "Aarav Sharma", "pupil@example.com", STUDENT)
 
     response = client.get(
         ATTENDANCE, params={"class_id": "CL_000001"}, headers=auth(pupil)
+    )
+
+    assert response.status_code == 404
+
+
+def test_a_parent_account_cannot_take_the_register(client):
+    """Reading widened in phase 6; marking stays the teacher's."""
+    s = a_class_of_two(client)
+    parent = signup(client, "Ravi Rao", "ravi@example.com", STUDENT)
+
+    response = client.post(
+        ATTENDANCE,
+        json={
+            "class_id": s["nursery"],
+            "date": TODAY,
+            "entries": [{"student_id": s["diya"], "status": "P"}],
+        },
+        headers=auth(parent),
     )
 
     assert response.status_code == 403

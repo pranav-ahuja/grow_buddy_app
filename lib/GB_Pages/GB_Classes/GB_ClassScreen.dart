@@ -1,10 +1,16 @@
+import 'dart:async';
+
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_AddTeacherSheet.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassDialogs.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassWidgets.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_RegisterStudentSheet.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentStore.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_NotificationStore.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ClassApi.dart';
 // GB_Event and GB_EventCard live with the home screen because that is where
 // they first appeared; the class screen shows the same card for the events of
 // one class, so it reuses them rather than growing a near-identical copy.
@@ -12,6 +18,7 @@ import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeWidgets.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
+import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Globals.dart';
 
 /// The screen behind a class tile on the teacher's dashboard.
 ///
@@ -19,9 +26,21 @@ import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dar
 /// the class's own colour with its events carousel, then the horizontally
 /// scrolling "Features" row, then "Students list" with a "See All" link.
 ///
-/// Everything below the class name is placeholder data — there is no classes,
-/// events, or students endpoint yet. [_events] and [_students] are the seams to
-/// replace when there is.
+/// The events carousel is still placeholder data — [_events] is the seam to
+/// replace when there is an events endpoint. The class, its teachers and its
+/// students are real.
+///
+/// **The principal gets a floating "Add teacher" button here**, and nobody
+/// else does. Choosing who takes a class is an administrator's act on a class
+/// that already exists, which is why it lives on the class rather than in the
+/// add-class form — a class is handed over and shared far more often than it
+/// is created.
+///
+/// Removing a pupil is offered to staff from the student card's menu. What
+/// happens next depends on who asked: the principal's takes effect, a
+/// teacher's becomes a request for the principal. The screen does not decide
+/// that and does not need to — the server says which happened, in a sentence
+/// this screen shows as-is.
 class GB_ClassScreen extends StatefulWidget {
   const GB_ClassScreen({super.key, required this.classInfo});
 
@@ -33,6 +52,11 @@ class GB_ClassScreen extends StatefulWidget {
 
 class _GB_ClassScreenState extends State<GB_ClassScreen> {
   int _activeEvent = 0;
+
+  /// Only the principal chooses who teaches a class. As everywhere else, this
+  /// governs what is **offered**: the server refuses a teacher's attempt
+  /// regardless, so a wrong answer here costs a button, not a permission.
+  bool get _canAssignTeachers => gIsPrincipal();
 
   /// This screen's copy of the class, kept in state because it can be renamed
   /// from here.
@@ -60,16 +84,111 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
   Future<void> _registerStudent() async {
     // The class is passed in, so the sheet opens with this one preselected and
     // the teacher does not have to find it in the dropdown.
-    final GB_Student? created = await GB_RegisterStudentSheet.show(
+    final GB_ActionResult? result = await GB_RegisterStudentSheet.show(
       context,
       initialClassId: _classInfo.id,
     );
 
-    if (created == null || !mounted) return;
+    if (result == null || !mounted) return;
+
+    final GB_Student? created = result.student;
+    if (created == null) {
+      // A teacher's registration is a request; there is no pupil yet, so no
+      // id to announce.
+      gShowSnack(context, result.detail);
+      unawaited(GB_NotificationStore.loadQuietly());
+      return;
+    }
+
     gShowSnack(
       context,
       "${created.name} added to ${_classInfo.name} as ${created.studentId}",
     );
+  }
+
+  /// The principal's "Add teacher" — who takes this class.
+  Future<void> _addTeacher() async {
+    final GB_ClassInfo? updated = await GB_AddTeacherSheet.show(
+      context,
+      classInfo: _classInfo,
+    );
+
+    // Null means dismissed, and nothing was sent.
+    if (updated == null || !mounted) return;
+
+    // This screen holds its own copy of the class, so the header and the next
+    // opening of the sheet both need the new one.
+    setState(() => _classInfo = updated);
+
+    final List<GB_ClassTeacher> teachers = updated.teachers;
+    gShowSnack(
+      context,
+      teachers.isEmpty
+          ? "${updated.name} is now unassigned"
+          : "${updated.name} is taught by "
+              "${teachers.map((GB_ClassTeacher t) => t.fullName).join(", ")}",
+    );
+  }
+
+  /// Removes a pupil, or asks the principal to.
+  ///
+  /// Confirmed first, and the confirmation is worded for the role: a principal
+  /// is about to delete a child's record and their whole attendance history,
+  /// and there is no class file to bring them back from the way there is for a
+  /// whole class. A teacher is only about to ask.
+  Future<void> _removeStudent(GB_Student student) async {
+    final bool asksFirst = !gIsPrincipal();
+
+    final bool confirmed = await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) => AlertDialog(
+            backgroundColor: kPrimaryColor2,
+            title: Text(
+              asksFirst
+                  ? "Ask to remove ${student.name}?"
+                  : "Remove ${student.name}?",
+            ),
+            content: Text(
+              asksFirst
+                  ? "The principal will be asked to approve it. Nothing "
+                      "changes until they do."
+                  : "This removes them from ${_classInfo.name} along with "
+                      "their attendance record. It cannot be undone.",
+              style: const TextStyle(
+                fontSize: kEventSubtitleTextSize,
+                height: 1.4,
+                color: kHomeSubtitleTextColor,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.error,
+                ),
+                child: Text(asksFirst ? "Ask" : "Remove"),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed || !mounted) return;
+
+    try {
+      final GB_ActionResult result =
+          await GB_StudentStore.removeStudent(student.studentId);
+      if (!mounted) return;
+      gShowSnack(context, result.detail);
+      if (result.isPending) unawaited(GB_NotificationStore.loadQuietly());
+    } on GB_ApiException catch (error) {
+      if (!mounted) return;
+      gShowSnack(context, error.message);
+    }
   }
 
   Future<void> _editClass() async {
@@ -113,6 +232,19 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: kPrimaryColor2,
+      // Only the principal's. A teacher has no button here at all rather than
+      // one that refuses — a control whose only job is to say no is worse
+      // than one that was never offered, which is the same reasoning that
+      // keeps the Fee tab off their dashboard.
+      floatingActionButton: _canAssignTeachers
+          ? FloatingActionButton.extended(
+              onPressed: _addTeacher,
+              backgroundColor: kHomeAccentColor,
+              foregroundColor: kPrimaryColor2,
+              icon: const Icon(Icons.person_add_alt),
+              label: const Text("Add teacher"),
+            )
+          : null,
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
@@ -154,7 +286,9 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
               ),
               const SizedBox(height: 4.0),
               _buildStudentsRow(),
-              const SizedBox(height: 24.0),
+              // Clears the floating button where there is one, so the last
+              // student card is never trapped under it.
+              SizedBox(height: _canAssignTeachers ? 88.0 : 24.0),
             ],
           ),
         ),
@@ -191,6 +325,7 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
               ),
             ),
           ),
+          _buildTeacherLine(),
           const SizedBox(height: 16.0),
           _buildEventsCarousel(),
           const SizedBox(height: 12.0),
@@ -201,6 +336,56 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
             ),
           ),
           const SizedBox(height: 20.0),
+        ],
+      ),
+    );
+  }
+
+  /// Who teaches this class, under the greeting.
+  ///
+  /// Shown to everyone, not just the principal: a class with two adults in the
+  /// room is a fact about it, and a teacher opening a class they co-teach
+  /// should see who else is on it. An unassigned class says so plainly rather
+  /// than leaving a blank line that reads as a loading state.
+  Widget _buildTeacherLine() {
+    final List<GB_ClassTeacher> teachers = _classInfo.teachers;
+
+    final String line;
+    if (teachers.isEmpty) {
+      line = _canAssignTeachers
+          ? "No teacher yet — add one below"
+          : "No teacher assigned yet";
+    } else {
+      // Class teacher first, which is the order the server sends them in.
+      line = teachers.map((GB_ClassTeacher t) => t.fullName).join(" · ");
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        kHomeHorizontalPadding,
+        4.0,
+        16.0,
+        0.0,
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.school_outlined,
+            size: kClassDeleteIconSize,
+            color: kHomeSubtitleTextColor,
+          ),
+          const SizedBox(width: 8.0),
+          Expanded(
+            child: Text(
+              line,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: kEventSubtitleTextSize,
+                color: kHomeSubtitleTextColor,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -315,6 +500,12 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
                   student: student,
                   onTap: () =>
                       gShowSnack(context, "Student profiles are coming soon"),
+                  // A long press rather than a visible bin on every card:
+                  // removing a child is rare and irreversible, and a delete
+                  // target sitting next to "open" on a 96pt card is a
+                  // mis-tap waiting to happen. The confirmation behind it
+                  // does the rest of the work.
+                  onLongPress: () => _removeStudent(student),
                 ),
               )
               .toList(),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
 import 'package:grow_buddy_app/GB_Services/GB_AuthApi.dart';
@@ -25,10 +27,49 @@ class _GB_VerifyState extends State<GB_Verify> {
   bool isSubmitting = false;
   bool isResending = false;
 
+  Timer? _resendTimer;
+  int _secondsUntilResend = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // GB_MobileLogin already sent a code to get here, so the cooldown is
+    // already running server-side when this screen opens.
+    _startResendCooldown();
+  }
+
   @override
   void dispose() {
+    _resendTimer?.cancel();
     _otpController.dispose();
     super.dispose();
+  }
+
+  /// Counts the resend button down from [kOtpResendCooldownSeconds].
+  ///
+  /// No setState on the first assignment: this runs from initState, before
+  /// the first build, and again from _resendOtp, whose finally-block
+  /// setState rebuilds with the fresh value.
+  void _startResendCooldown() {
+    _resendTimer?.cancel();
+    _secondsUntilResend = kOtpResendCooldownSeconds;
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _secondsUntilResend--);
+      if (_secondsUntilResend <= 0) timer.cancel();
+    });
+  }
+
+  /// The resend button's label, which doubles as the countdown readout.
+  String get _resendLabel {
+    if (isResending) return 'Sending...';
+    if (_secondsUntilResend <= 0) return 'Resend Code';
+    final String seconds =
+        (_secondsUntilResend % 60).toString().padLeft(2, '0');
+    return 'Resend Code in ${_secondsUntilResend ~/ 60}:$seconds';
   }
 
   void _showSnack(String message) {
@@ -70,6 +111,7 @@ class _GB_VerifyState extends State<GB_Verify> {
     try {
       final result = await GB_AuthApi.requestOtp(widget.phoneNumber);
       _showSnack(result.displayMessage);
+      _startResendCooldown();
     } on GB_ApiException catch (error) {
       _showSnack(error.message);
     } finally {
@@ -155,15 +197,23 @@ class _GB_VerifyState extends State<GB_Verify> {
                 child: Center(
                   child: GB_ElevatedButtonString(
                     screenWidth: screenWidth,
-                    horizontalPadding: 0.2,
+                    // Narrower than Confirm's 0.25 because the countdown
+                    // label is far longer than "Confirm" -- at 0.2 the two
+                    // together overflow a 320dp screen.
+                    horizontalPadding: 0.12,
                     verticalPadding: 10.0,
-                    elevatedButtonText:
-                        isResending ? "Sending..." : "Resend Code",
-                    buttonColor: kPrimaryColor2,
-                    elevatedButtonTextColor: kPrimaryColor1,
+                    elevatedButtonText: _resendLabel,
+                    // Same filled box as Confirm above, by request. The
+                    // backgroundColor is a WidgetStateProperty.all, so the
+                    // colour holds while the button is disabled and the
+                    // label alone carries the waiting state.
+                    buttonColor: kPrimaryColor1,
+                    elevatedButtonTextColor: kPrimaryColor2,
                     elevatedButtonFontWeight: FontWeight.w500,
                     elevatedButtonTextSize: kElevatedButtonTextSize,
-                    onPressed: isResending ? null : _resendOtp,
+                    onPressed: (isResending || _secondsUntilResend > 0)
+                        ? null
+                        : _resendOtp,
                   ),
                 ),
               ),

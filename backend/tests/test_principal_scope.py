@@ -6,6 +6,8 @@ every student in the school, not one teacher's. The thing worth pinning is the
 boundary — reading widened, owning did not.
 """
 
+import helpers
+
 SIGNUP = "/api/v1/auth/signup"
 CLASSES = "/api/v1/classes"
 STUDENTS = "/api/v1/students"
@@ -33,27 +35,26 @@ def signup(client, *, name: str, email: str, account_type: int) -> str:
 
 
 def make_class(client, token: str, name: str) -> str:
-    response = client.post(
-        CLASSES, json={"name": name, "color_slot": 0}, headers=auth(token)
-    )
-    assert response.status_code == 201, response.text
-    return response.json()["class_id"]
+    """A class belonging to [token]'s teacher.
+
+    Created through a principal by `helpers`, because a teacher's own POST
+    /classes is a request now. What this file is about is read scope, and the
+    row it needs is the same one either path produces.
+    """
+    return helpers.make_class(client, token, name)
 
 
 def add_student(client, token: str, class_id: str, name: str) -> dict:
-    response = client.post(
-        STUDENTS,
-        json={
-            "class_id": class_id,
-            "name": name,
-            "date_of_birth": "2021-04-12",
-            "gender": "Female",
-            "address": "12 Rose Lane",
-        },
-        headers=auth(token),
+    """Registers a pupil into [class_id], as staff who may do it outright.
+
+    [token] names whose class it is meant to be, not who sends the request:
+    like make_class, this is setup for a test about **reading**, and a
+    teacher's own registration has been a request since 2026-09-20. The one
+    test that is about who may register sends its own request, below.
+    """
+    return helpers.add_student(
+        client, helpers.admin_token(client), class_id, name
     )
-    assert response.status_code == 201, response.text
-    return response.json()
 
 
 def two_teachers_and_a_principal(client) -> tuple[str, str, str]:
@@ -172,10 +173,29 @@ def test_a_teacher_cannot_read_another_teachers_roster(client):
 
 
 def test_principal_can_register_a_student_into_any_class(client):
+    """Sent as the principal on purpose — this is the test about who may.
+
+    A principal's registration goes straight in: `status: "done"` and the
+    pupil in the response, rather than the `"pending"` a teacher would get.
+    """
     asha, _, head = two_teachers_and_a_principal(client)
     class_id = make_class(client, asha, "Nursery")
 
-    created = add_student(client, head, class_id, "Diya")
+    response = client.post(
+        STUDENTS,
+        json={
+            "class_id": class_id,
+            "name": "Diya",
+            "date_of_birth": "2021-04-12",
+            "gender": "Female",
+            "address": "12 Rose Lane",
+        },
+        headers=auth(head),
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "done"
+    created = response.json()["student"]
 
     assert created["class_id"] == class_id
     # And the owning teacher sees them, because the student is the class's.
@@ -184,19 +204,29 @@ def test_principal_can_register_a_student_into_any_class(client):
     ]
 
 
-def test_principal_cannot_rename_or_delete_a_class(client):
+def test_principal_can_rename_and_delete_any_class(client):
+    """Reversed on 2026-09-20, deliberately.
+
+    This asserted 403 on both. The principal is the school's admin now and
+    manages classes outright — it is the *teacher* whose delete became a
+    request. The guard that remains is in test_approvals.py: a teacher's
+    delete changes nothing until it is granted.
+    """
     asha, _, head = two_teachers_and_a_principal(client)
     class_id = make_class(client, asha, "Nursery")
 
     renamed = client.patch(
         f"{CLASSES}/{class_id}", json={"name": "Reception"}, headers=auth(head)
     )
-    deleted = client.delete(f"{CLASSES}/{class_id}", headers=auth(head))
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "Reception"
+    # And the owning teacher sees the new name, because it is still their class.
+    assert client.get(CLASSES, headers=auth(asha)).json()[0]["name"] == "Reception"
 
-    assert renamed.status_code == 403
-    assert deleted.status_code == 403
-    # Untouched.
-    assert client.get(CLASSES, headers=auth(asha)).json()[0]["name"] == "Nursery"
+    deleted = client.delete(f"{CLASSES}/{class_id}", headers=auth(head))
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["status"] == "done"
+    assert client.get(CLASSES, headers=auth(asha)).json() == []
 
 
 def test_a_principal_with_no_classes_gets_an_empty_list_not_an_error(client):

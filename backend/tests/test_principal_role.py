@@ -74,30 +74,49 @@ def test_profile_completion_can_choose_principal(client):
     assert response.json()["role"] == "principal"
 
 
-def test_a_principal_can_read_classes_but_owns_none(client):
-    """A principal reads school-wide, but gets no TR_ row and owns nothing.
+def test_a_principal_creates_classes_but_still_has_no_teacher_record(client):
+    """Half of this reversed on 2026-09-20, and half of it must not.
 
-    This is the guard worth keeping. The obvious way to make the principal's
-    dashboard work would have been to let `_current_teacher` accept them, which
-    would have quietly given every principal a teacher's class-owning identity
-    — and every class they created would have been filed under it. Reading is
-    scoped by role instead; owning stays a teacher's.
+    What changed: the principal is the school's admin and creates classes
+    outright. Phase 1 refused them, on the reasoning that a class belongs to
+    the teacher who owns it; the role is an administrator now and that
+    reasoning no longer holds.
+
+    What did **not** change, and is the guard still worth keeping: a principal
+    gets no `TR_` row. The tempting shortcut was always to let the teacher
+    lookup accept them, which would have handed every principal a teacher's
+    class-owning identity and filed their classes under it. Instead a class
+    they create with no `teacher_id` is genuinely **unassigned** — owned by
+    nobody — until they give it to someone.
     """
     token = client.post(SIGNUP, json=PRINCIPAL).json()["access_token"]
 
     assert client.get(CLASSES, headers=auth(token)).status_code == 200
 
-    refused = client.post(
+    created = client.post(
         CLASSES,
         json={"name": "Nursery", "color_slot": 0},
         headers=auth(token),
     )
-    assert refused.status_code == 403
-    assert "does not own one" in refused.json()["detail"]
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["status"] == "done"
+    # Unassigned, not filed under a teacher record invented for the principal.
+    assert body["school_class"]["teacher_id"] is None
+    assert body["school_class"]["teachers"] == []
+
+    # And they still have no teacher record of their own.
+    assert client.get("/api/v1/teachers/me", headers=auth(token)).status_code == 404
 
 
-def test_a_student_still_reaches_nothing(client):
-    """The 403 a student gets is unchanged — only the principal's path moved."""
+def test_a_student_account_owns_no_classes_either(client):
+    """Rewritten in phase 6.
+
+    This asserted 403 on `GET /classes`. A student account is a parent now and
+    reads the classes its children are in — none yet, so an empty list. What
+    still holds, and is the point of the test, is that it owns nothing: it
+    cannot create a class any more than a principal can.
+    """
     token = client.post(
         SIGNUP,
         json={
@@ -108,10 +127,13 @@ def test_a_student_still_reaches_nothing(client):
         },
     ).json()["access_token"]
 
-    response = client.get(CLASSES, headers=auth(token))
+    assert client.get(CLASSES, headers=auth(token)).json() == []
 
-    assert response.status_code == 403
-    assert response.json()["detail"] == "Only teachers can manage classes"
+    refused = client.post(
+        CLASSES, json={"name": "Nursery", "color_slot": 0}, headers=auth(token)
+    )
+    assert refused.status_code == 403
+    assert refused.json()["detail"] == "Only teachers can manage classes"
 
 
 def test_teacher_and_student_signups_are_unaffected(client):

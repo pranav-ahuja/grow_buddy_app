@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:carousel_slider/carousel_slider.dart';
@@ -14,7 +15,9 @@ import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentStore.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeAppBar.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_HomeWidgets.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_NotificationStore.dart';
 import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ClassApi.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 
@@ -53,16 +56,22 @@ class GB_DashboardPermissions {
 
   /// Whether the list ends with the "Add a class" tile.
   ///
-  /// Teachers create their own classes. A principal does not: they will assign
-  /// teachers to classes, which is a different act on a class that already
-  /// exists — and the server refuses a principal's POST /classes for the same
-  /// reason, since a class has to belong to a teacher.
+  /// **Both roles have it since 2026-09-20**, and they mean different things
+  /// by it. The principal's creates a class outright, under a teacher they
+  /// pick or under nobody at all. A teacher's raises a request the principal
+  /// has to grant, and nothing appears on any dashboard until they do.
+  ///
+  /// The distinction is not drawn here on purpose. The server decides it from
+  /// who is asking and says which happened, and a screen that also decided it
+  /// would be a second copy of the rule to keep in step.
   final bool canAddClass;
 
   /// Whether tiles carry the bin icon.
   ///
   /// Deleting a class writes its `.xlsx` archive first and then removes every
-  /// student in it. That is the owning teacher's call.
+  /// student in it. The principal's takes effect; a teacher's is a request,
+  /// and the archive is written either way — so an approval that comes
+  /// tomorrow finds the file already saved.
   final bool canDeleteClass;
 
   /// Whether the caption names the teacher who owns the class. Only useful
@@ -71,7 +80,11 @@ class GB_DashboardPermissions {
 
   final List<GB_DashboardTab> tabs;
 
-  /// The teacher: their own classes, which they may add to and delete from.
+  /// The teacher: the classes they take — the ones they own and the ones the
+  /// principal added them to as a co-teacher.
+  ///
+  /// They may still start an add or a delete; both become requests. Saying so
+  /// is the add sheet's and the confirmation's job, not this list's.
   ///
   /// **No Fee tab.** Fee status belongs to the principal, so it is absent from
   /// the teacher's bar rather than present and refusing — a tab that exists
@@ -89,14 +102,13 @@ class GB_DashboardPermissions {
     ],
   );
 
-  /// The principal: every class in the school, read and open, plus the Fee tab.
+  /// The principal: every class in the school, and the admin's powers over
+  /// them — create, delete, and hand to a teacher — plus the Fee tab.
   static const GB_DashboardPermissions principal = GB_DashboardPermissions(
     sectionHeader: "Every class in the school",
-    emptyMessage:
-        "No classes yet. Teachers create their own classes; they'll appear "
-        "here as soon as they do.",
-    canAddClass: false,
-    canDeleteClass: false,
+    emptyMessage: "No classes yet. Add the school's first one below.",
+    canAddClass: true,
+    canDeleteClass: true,
     showsClassOwner: true,
     tabs: [
       GB_DashboardTab(label: "Home", icon: Icons.home),
@@ -174,6 +186,11 @@ class _GB_HomeDashboardState extends State<GB_HomeDashboard>
   /// Both together, since the tiles need both — a class list without its
   /// students would show every class as "0 students" for a moment.
   Future<void> _refresh() async {
+    // The notifications go up with them, so the bell's badge is right by the
+    // time the dashboard is drawn. [loadQuietly] because a bell that could
+    // not refresh must not be what stops a teacher seeing their classes.
+    unawaited(GB_NotificationStore.loadQuietly());
+
     try {
       await Future.wait([GB_ClassStore.load(), GB_StudentStore.load()]);
       if (!mounted) return;
@@ -221,11 +238,23 @@ class _GB_HomeDashboardState extends State<GB_HomeDashboard>
   }
 
   Future<void> _addClass() async {
-    final GB_ClassInfo? created = await GB_AddClassSheet.show(context);
+    final GB_ActionResult? result = await GB_AddClassSheet.show(context);
 
     // Null means the sheet was dismissed. The list repaints itself off the
     // store, so there is nothing to do here but confirm.
-    if (created == null || !mounted) return;
+    if (result == null || !mounted) return;
+
+    final GB_ClassInfo? created = result.classInfo;
+    if (created == null) {
+      // A teacher's: nothing was created, a request is waiting. The server's
+      // own sentence says so — the app would otherwise have to know the
+      // approval rule in order to word this, and be wrong the day it changes.
+      gShowSnack(context, result.detail);
+      // The badge moves the moment their request lands in the principal's
+      // queue, and it is the only sign on this screen that anything happened.
+      unawaited(GB_NotificationStore.loadQuietly());
+      return;
+    }
 
     // A class restored from a file arrives with its students already in the
     // store, so the count is what says whether this was a fresh class or a
@@ -279,11 +308,15 @@ class _GB_HomeDashboardState extends State<GB_HomeDashboard>
       return;
     }
 
+    final GB_ActionResult result;
     try {
       // The server deletes the students with the class; the local prune only
-      // brings this device's copy into line.
-      await GB_ClassStore.removeClass(classInfo.id);
-      GB_StudentStore.removeStudentsInClass(classInfo.id);
+      // brings this device's copy into line. A teacher's delete deletes
+      // nothing yet, and [GB_ClassStore.removeClass] knows not to prune then.
+      result = await GB_ClassStore.removeClass(classInfo.id);
+      if (result.isDone) {
+        GB_StudentStore.removeStudentsInClass(classInfo.id);
+      }
     } on GB_ApiException catch (error) {
       if (!mounted) return;
       // The class file was written, but the class still exists — saying it was
@@ -296,7 +329,17 @@ class _GB_HomeDashboardState extends State<GB_HomeDashboard>
     }
 
     if (!mounted) return;
-    gShowSnack(context, "${classInfo.name} deleted — class file saved");
+    if (result.isDone) {
+      gShowSnack(context, "${classInfo.name} deleted — class file saved");
+      return;
+    }
+
+    // Waiting on the principal. The archive was still written first, and
+    // saying so matters: the teacher has a file on their device for a class
+    // that is still on their dashboard, and without this that reads as a
+    // delete that half happened.
+    gShowSnack(context, "${result.detail} The class file has been saved.");
+    unawaited(GB_NotificationStore.loadQuietly());
   }
 
   /// The caption under a class name: always the real count, never the design's
@@ -318,10 +361,19 @@ class _GB_HomeDashboardState extends State<GB_HomeDashboard>
   }
 
   Future<void> _registerStudent() async {
-    final GB_Student? created = await GB_RegisterStudentSheet.show(context);
+    final GB_ActionResult? result = await GB_RegisterStudentSheet.show(context);
 
     // Null means the sheet was dismissed.
-    if (created == null || !mounted) return;
+    if (result == null || !mounted) return;
+
+    final GB_Student? created = result.student;
+    if (created == null) {
+      // A teacher's registration is a request; no pupil exists yet, so there
+      // is no id or roll number to announce.
+      gShowSnack(context, result.detail);
+      unawaited(GB_NotificationStore.loadQuietly());
+      return;
+    }
 
     // The design's third screen is "Student added to the class", so the
     // confirmation names the class. Every student has one now; the fallback

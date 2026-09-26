@@ -5,6 +5,7 @@ import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassStore.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentFormFields.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentStore.dart';
 import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ClassApi.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:image_picker/image_picker.dart';
@@ -36,11 +37,11 @@ class GB_RegisterStudentSheet extends StatefulWidget {
   /// from the dashboard, where no class is in context yet.
   final String? initialClassId;
 
-  static Future<GB_Student?> show(
+  static Future<GB_ActionResult?> show(
     BuildContext context, {
     String? initialClassId,
   }) {
-    return showModalBottomSheet<GB_Student>(
+    return showModalBottomSheet<GB_ActionResult>(
       context: context,
       // The form is taller than the screen and the keyboard covers half of what
       // is left, so the sheet has to be free to size itself.
@@ -324,7 +325,12 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
     try {
       // The server assigns the student id, so it is only known once this
       // returns — which is why the sheet waits rather than closing at once.
-      final GB_Student created = await GB_StudentStore.addStudent(
+      //
+      // And it decides whether the pupil was registered at all: a principal's
+      // registration goes straight in, a teacher's becomes a request for
+      // approval. The result says which, and the caller words its
+      // confirmation from it rather than assuming.
+      final GB_ActionResult result = await GB_StudentStore.addStudent(
         name: _nameController.text,
         dateOfBirth: _dateOfBirth!,
         gender: _gender!,
@@ -350,7 +356,7 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
       );
 
       if (!mounted) return;
-      Navigator.of(context).pop(created);
+      Navigator.of(context).pop(result);
     } on GB_ApiException catch (error) {
       if (!mounted) return;
       // The sheet stays open with everything the teacher typed, so a dropped

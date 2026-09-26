@@ -44,11 +44,21 @@ class GB_ClassStore {
   /// should not have to reproduce the rule to do so.
   static int get nextColorSlot => classes.value.length % GB_ClassPalette.length;
 
-  /// Adds a class on the server and returns it as the server stored it.
+  /// Adds a class on the server, or asks the principal for one.
   ///
-  /// [colorSlot] is the palette slot the teacher picked. Null falls back to
+  /// Which of the two happens is the server's decision — a principal's create
+  /// goes straight in, a teacher's becomes a request — so this returns the
+  /// [GB_ActionResult] rather than a class, and the local copy is **only**
+  /// touched when something was really created. A pending request has not
+  /// changed the school, and a store that guessed otherwise would put a class
+  /// on the dashboard that does not exist.
+  ///
+  /// [colorSlot] is the palette slot that was picked. Null falls back to
   /// [nextColorSlot], so a caller that does not offer the choice still gets a
   /// coloured class rather than an uncoloured one.
+  ///
+  /// [teacherId] is the class teacher and only a principal may set it; null
+  /// creates an unassigned class.
   ///
   /// [students] is for "Restore class": the class file's students go up in the
   /// same request, and the server creates both or neither. They land in
@@ -56,23 +66,51 @@ class GB_ClassStore {
   ///
   /// Throws [GB_ApiException] if the server refuses — a duplicate name added
   /// from another device, say — and leaves the local copy untouched.
-  static Future<GB_ClassInfo> addClass({
+  static Future<GB_ActionResult> addClass({
     required String name,
     int? colorSlot,
+    String? teacherId,
     List<GB_Student> students = const [],
   }) async {
-    final GB_ClassInfo created = await GB_ClassApi.createClass(
+    final GB_ActionResult result = await GB_ClassApi.createClass(
       token: gRequireToken(),
       name: name.trim(),
       colorSlot: colorSlot ?? nextColorSlot,
+      teacherId: teacherId,
       students: students,
     );
 
-    // A new list is assigned rather than the existing one mutated: ValueNotifier
-    // compares with `==`, and mutating in place leaves the identical List
-    // instance in the field, so no listener would be told anything changed.
-    classes.value = [...classes.value, created];
-    return created;
+    final GB_ClassInfo? created = result.classInfo;
+    if (created != null) {
+      // A new list is assigned rather than the existing one mutated:
+      // ValueNotifier compares with `==`, and mutating in place leaves the
+      // identical List instance in the field, so no listener would be told
+      // anything changed.
+      classes.value = [...classes.value, created];
+    }
+    return result;
+  }
+
+  /// Sets who teaches a class — the principal's "Add teacher" picker.
+  ///
+  /// The whole set, not a difference. Replaces the class in the local copy
+  /// with the server's answer, so the class screen and the dashboard tile
+  /// both redraw with the new names.
+  static Future<GB_ClassInfo> setTeachers(
+    String id,
+    List<String> teacherIds,
+  ) async {
+    final GB_ClassInfo updated = await GB_ClassApi.setClassTeachers(
+      token: gRequireToken(),
+      id: id,
+      teacherIds: teacherIds,
+    );
+
+    classes.value = [
+      for (final GB_ClassInfo item in classes.value)
+        if (item.id == id) updated else item,
+    ];
+    return updated;
   }
 
   /// True when [name] is already taken, ignoring case and surrounding spaces —
@@ -130,12 +168,25 @@ class GB_ClassStore {
   }
 
   /// Deletes a class on the server — which deletes its students there too —
-  /// and then drops it from the local copy.
-  static Future<void> removeClass(String id) async {
-    await GB_ClassApi.deleteClass(token: gRequireToken(), id: id);
-    classes.value = classes.value
-        .where((GB_ClassInfo item) => item.id != id)
-        .toList();
+  /// or asks the principal to.
+  ///
+  /// The local copy is pruned **only** when the deletion really happened. A
+  /// teacher's delete raises a request and leaves the class exactly where it
+  /// was, and a store that removed the tile anyway would tell them it had
+  /// gone: the class would come back on the next refresh, which is the worst
+  /// possible way to learn that approval is needed.
+  static Future<GB_ActionResult> removeClass(String id) async {
+    final GB_ActionResult result = await GB_ClassApi.deleteClass(
+      token: gRequireToken(),
+      id: id,
+    );
+
+    if (result.isDone) {
+      classes.value = classes.value
+          .where((GB_ClassInfo item) => item.id != id)
+          .toList();
+    }
+    return result;
   }
 
   /// Forgets the local copy — on sign-out, so the next account to sign in on

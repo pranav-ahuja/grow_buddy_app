@@ -9,7 +9,15 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import engine
 from app.migrations import require_current
-from app.routers import attendance, auth, classes, subjects, teachers
+from app.routers import (
+    approvals,
+    attendance,
+    auth,
+    classes,
+    guardians,
+    subjects,
+    teachers,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -77,3 +85,7 @@ app.include_router(classes.router, prefix=settings.api_prefix)
 app.include_router(subjects.router, prefix=settings.api_prefix)
 app.include_router(attendance.router, prefix=settings.api_prefix)
 app.include_router(teachers.router, prefix=settings.api_prefix)
+app.include_router(guardians.router, prefix=settings.api_prefix)
+# The approval queue and the notification tab. Last, because everything
+# above it is what raises the requests it answers.
+app.include_router(approvals.router, prefix=settings.api_prefix)

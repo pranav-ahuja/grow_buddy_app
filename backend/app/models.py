@@ -1,8 +1,9 @@
 import uuid as uuid_lib
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     Date,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Time,
     Uuid,
     func,
     text,
@@ -303,15 +305,28 @@ class PasswordResetCode(Base):
 
 
 class SchoolClass(Base):
-    """A class on a teacher's dashboard. CL_000001.
+    """A class on a dashboard. CL_000001.
 
-    Owned by a teacher: two teachers each having a "Nursery" is normal, and
-    neither should see the other's. Every query in the classes router filters on
-    `teacher_id`, which is what makes that true.
+    **`teacher_id` is the class teacher — the one owner — and it is nullable.**
+    The principal creates classes now, and a class created in August before
+    anyone has been given it is a real thing with nobody teaching it yet. Null
+    means exactly that: unassigned, not broken.
+
+    A class may be taught by **more than one** teacher. The extra ones live in
+    `class_teachers`; this column holds the first among them. One owner plus a
+    set, rather than the set alone, so `uq_classes_teacher_name` still means
+    what it always did — two teachers each having a "Nursery" is normal, and
+    neither should see the other's.
+
+    Ask [app.access.teacher_class_ids] for "which classes are mine": it
+    answers with both halves, and no router should ask with a bare
+    `teacher_id ==` again.
 
     The roll numbers and student names that sit alongside a class are in the
     `class_roster` view (see app/database.py), not here — a class has to exist
-    before its first student can be registered into it.
+    before its first student can be registered into it. Note the view's
+    `teacher_id` is this column, so it names the owner and knows nothing of
+    co-teachers; it is not a scope to filter by any more.
     """
 
     __tablename__ = "classes"
@@ -331,8 +346,13 @@ class SchoolClass(Base):
     uuid: Mapped[uuid_lib.UUID] = mapped_column(
         Uuid, unique=True, default=_new_uuid
     )
-    teacher_id: Mapped[str] = mapped_column(
-        ForeignKey("teachers.teacher_id", ondelete="CASCADE"), index=True
+    # Nullable since 0006: an unassigned class is one the principal has
+    # created and not yet handed to anyone. CASCADE still, so deleting a
+    # teacher takes the classes that were theirs alone with them.
+    teacher_id: Mapped[str | None] = mapped_column(
+        ForeignKey("teachers.teacher_id", ondelete="CASCADE"),
+        index=True,
+        default=None,
     )
     name: Mapped[str] = mapped_column(String(80))
 
@@ -604,5 +624,305 @@ class TeacherExperience(Base):
     school_name: Mapped[str] = mapped_column(String(160))
     school_address: Mapped[str] = mapped_column(String(500), default="")
     years: Mapped[Decimal] = mapped_column(Numeric(4, 1))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class StudentGuardian(Base):
+    """Which account may see which pupil — the parent's link to their child.
+
+    The app is for parents, so a "student" account is really a parent
+    operating on a child's behalf. Nothing joined the two before this: a
+    `students` row is created by a teacher from a paper form, and a
+    `users` row with role 'student' was just a role. Without this table a
+    parent who signs up cannot be shown anything at all.
+
+    **Many-to-many, deliberately.** A parent may have two children at the
+    school, and a child may have two parents who each want the app. Either as
+    a column would have capped the wrong side of that.
+
+    **Only staff create these rows.** A parent cannot claim a child by
+    asserting they are the parent — that is the one thing in this schema where
+    getting it wrong hands a stranger a child's address, attendance and
+    contacts. The teacher who registered the pupil, or the principal, makes
+    the link; the register-student form already collected the parents' names
+    and numbers, so the school is the party that actually knows.
+
+    A self-service claim ("my number is on that child's record, link me") is
+    the obvious convenience and is deliberately absent: it needs an approval
+    step, which is phase 5.
+
+    `linked_by_user_id` records who made the link, SET NULL so the link
+    outlives the staff member who made it.
+    """
+
+    __tablename__ = "student_guardians"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
+    )
+    # Indexed as well as being half the primary key: that key leads on
+    # `user_id`, so it answers "which children may this account see" but not
+    # "who are this pupil's guardians" — which is what the staff-facing list
+    # and every future notification fan-out will ask.
+    student_id: Mapped[str] = mapped_column(
+        ForeignKey("students.student_id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+
+    # "Mother", "Father", "Grandmother" — free text, as on the student's own
+    # guardian block. Blank when nobody said.
+    relation: Mapped[str] = mapped_column(String(32), default="")
+
+    linked_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.user_id", ondelete="SET NULL"), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class ClassTeacher(Base):
+    """An extra teacher on a class — the co-teachers, beside the owner.
+
+    A class has one class teacher (`classes.teacher_id`) and may have any
+    number of others: a nursery with a second adult in the room, a subject
+    teacher who takes the same group. The principal picks them, several at a
+    time, from the class screen.
+
+    Many-to-many and keyed on the pair, so the same teacher cannot be added to
+    a class twice — which is what lets the picker send the whole set without
+    first working out the difference.
+
+    **The owner is not repeated here.** One fact, one place: a teacher in both
+    would be a teacher who could be removed from a class and still be
+    teaching it. [app.access.teacher_class_ids] unions the two halves, and it
+    is the only thing that should.
+
+    `assigned_by_user_id` is SET NULL, like every other "who did this" column
+    in this schema: a principal leaving must not delete the school's teaching
+    assignments on their way out.
+    """
+
+    __tablename__ = "class_teachers"
+
+    class_id: Mapped[str] = mapped_column(
+        ForeignKey("classes.class_id", ondelete="CASCADE"), primary_key=True
+    )
+    # Indexed as well as being half the key: the key leads on class_id, so it
+    # answers "who teaches this class" but not "which classes does this
+    # teacher take" — which is the question every dashboard load asks.
+    teacher_id: Mapped[str] = mapped_column(
+        ForeignKey("teachers.teacher_id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+
+    assigned_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.user_id", ondelete="SET NULL"), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# What a teacher can ask the principal for. Each one is an act the principal
+# may simply do and a teacher may only request — that asymmetry is the whole
+# point of the table.
+REQUEST_CLASS_CREATE = "class_create"
+REQUEST_CLASS_DELETE = "class_delete"
+REQUEST_STUDENT_ADD = "student_add"
+REQUEST_STUDENT_REMOVE = "student_remove"
+
+REQUEST_KINDS = (
+    REQUEST_CLASS_CREATE,
+    REQUEST_CLASS_DELETE,
+    REQUEST_STUDENT_ADD,
+    REQUEST_STUDENT_REMOVE,
+)
+
+REQUEST_PENDING = "pending"
+REQUEST_APPROVED = "approved"
+REQUEST_REJECTED = "rejected"
+
+REQUEST_STATUSES = (REQUEST_PENDING, REQUEST_APPROVED, REQUEST_REJECTED)
+
+_KIND_LIST = "', '".join(REQUEST_KINDS)
+_STATUS_LIST = "', '".join(REQUEST_STATUSES)
+
+
+class ChangeRequest(Base):
+    """A teacher asking the principal to make a change, and the answer.
+
+    Creating a class, deleting one, registering a pupil and removing one are
+    all things the principal does outright. A teacher may only ask: the row
+    below *is* the asking, and until somebody approves it **nothing else in
+    the database has changed**. That is the rule to hold on to — the class
+    does not exist yet, the pupil is not registered yet, and no count, roster
+    or register includes them. A pending row that had already half happened
+    would be the worst of both.
+
+    `payload` carries what to do on approval — the class name and colour, or
+    the whole register-student form — because by then the teacher may be
+    offline, or gone. It is the request's own copy, and it is validated again
+    when it runs: a class name that was free when it was asked for may have
+    been taken by the time it is granted.
+
+    `requested_by_name` is deliberately **denormalised**. The teacher link is
+    SET NULL so a teacher leaving does not erase the school's decision
+    history, and a queue reading "somebody wanted this class deleted" is not a
+    queue anyone can act on.
+
+    An integer key, not an `RQ_` code: nobody quotes a request. It is read off
+    a list, decided, and done with — the same reasoning as `attendance`.
+    """
+
+    __tablename__ = "change_requests"
+    __table_args__ = (
+        CheckConstraint(
+            f"kind IN ('{_KIND_LIST}')", name="ck_change_requests_kind"
+        ),
+        CheckConstraint(
+            f"status IN ('{_STATUS_LIST}')", name="ck_change_requests_status"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    uuid: Mapped[uuid_lib.UUID] = mapped_column(
+        Uuid, unique=True, default=_new_uuid
+    )
+
+    kind: Mapped[str] = mapped_column(String(32))
+    # Indexed because the principal's queue is "pending, newest first", by
+    # far the most frequent read of this table.
+    status: Mapped[str] = mapped_column(
+        String(16), default=REQUEST_PENDING, index=True
+    )
+
+    requested_by_teacher_id: Mapped[str | None] = mapped_column(
+        ForeignKey("teachers.teacher_id", ondelete="SET NULL"),
+        index=True,
+        default=None,
+    )
+    requested_by_name: Mapped[str] = mapped_column(String(120), default="")
+
+    # The target, where there already is one. Null on a class_create, whose
+    # class does not exist until the request is granted.
+    class_id: Mapped[str | None] = mapped_column(
+        ForeignKey("classes.class_id", ondelete="SET NULL"), default=None
+    )
+    student_id: Mapped[str | None] = mapped_column(
+        ForeignKey("students.student_id", ondelete="SET NULL"), default=None
+    )
+
+    # One line the principal can decide from without opening anything:
+    # 'Delete "Nursery" and its 12 students'. Written when the request is
+    # raised, so it still describes what was asked even after the class it
+    # names has gone.
+    summary: Mapped[str] = mapped_column(String(300), default="")
+
+    # What to do on approval. JSON on both engines — JSONB on PostgreSQL,
+    # TEXT on SQLite — because the shape differs per kind, and a column per
+    # field would be four half-empty sets of them.
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    decided_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.user_id", ondelete="SET NULL"), default=None
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    # Why it was turned down, in the principal's words. Shown to the teacher,
+    # because "rejected" with no reason is how a teacher asks again tomorrow.
+    decision_note: Mapped[str] = mapped_column(String(500), default="")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# Who a notification is for: one named account, or everybody.
+NOTIFY_AUDIENCE_USER = "user"
+NOTIFY_AUDIENCE_BROADCAST = "broadcast"
+
+NOTIFY_AUDIENCES = (NOTIFY_AUDIENCE_USER, NOTIFY_AUDIENCE_BROADCAST)
+
+_AUDIENCE_LIST = "', '".join(NOTIFY_AUDIENCES)
+
+
+class Notification(Base):
+    """One line in somebody's notification tab.
+
+    The fields are the ones asked for: the **date** and the **time** it was
+    raised, its **source**, whether it is for an **individual account or a
+    broadcast**, and the **message** itself as text.
+
+    Date and time are two columns rather than one timestamp because that is
+    how the tab reads them — grouped under "20 September", each line stamped
+    "14:32". `created_at` is kept alongside for ordering, which is the one job
+    a split date and time do badly.
+
+    **The message is stored, not generated at read time.** "Asha Rao requests
+    approval for removal of Nursery" has to still say that in a month, after
+    Nursery is gone and Asha has left. A notification that re-renders itself
+    from live rows quietly rewrites history — and the history is the only
+    reason to keep it.
+
+    `request_id` is what makes the tab actionable: where it is set, the line
+    is an approval the principal can decide on the spot. Null for anything
+    that is only news.
+    """
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        CheckConstraint(
+            f"audience IN ('{_AUDIENCE_LIST}')",
+            name="ck_notifications_audience",
+        ),
+        # A 'user' notice with nobody to deliver it to, and a broadcast
+        # addressed to one person, are both nonsense the table should not be
+        # able to hold.
+        CheckConstraint(
+            f"(audience = '{NOTIFY_AUDIENCE_USER}' AND user_id IS NOT NULL) "
+            f"OR (audience = '{NOTIFY_AUDIENCE_BROADCAST}' "
+            "AND user_id IS NULL)",
+            name="ck_notifications_addressed",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    uuid: Mapped[uuid_lib.UUID] = mapped_column(
+        Uuid, unique=True, default=_new_uuid
+    )
+
+    date: Mapped[date] = mapped_column(Date)
+    time: Mapped[time] = mapped_column(Time)
+
+    # Where it came from, in words: a teacher's name, or "GrowBuddy" for
+    # anything the system says itself. Text rather than a user link, because
+    # the source of a notice outlives the account that caused it, and some
+    # notices have no account behind them at all.
+    source: Mapped[str] = mapped_column(String(120), default="GrowBuddy")
+
+    audience: Mapped[str] = mapped_column(
+        String(16), default=NOTIFY_AUDIENCE_USER
+    )
+    # The recipient, for an individual notice. Null on a broadcast, which
+    # everybody reads. CASCADE: a deleted account's notices go with it.
+    user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        index=True,
+        default=None,
+    )
+
+    message: Mapped[str] = mapped_column(String(500))
+
+    # Set where this line is an approval to decide. SET NULL rather than
+    # CASCADE: the notice that something was asked for is still true after
+    # the request itself has been cleared away.
+    request_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_requests.id", ondelete="SET NULL"), default=None
+    )
+
+    # Per recipient, which is why it lives here and not on the request: two
+    # principals each get their own row and each reads it in their own time.
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

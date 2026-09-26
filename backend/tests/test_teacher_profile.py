@@ -6,6 +6,8 @@ nobody else's, the principal edits anyone's, only the principal assigns
 subjects, and the Aadhaar number never leaves the server in full.
 """
 
+import helpers
+
 SIGNUP = "/api/v1/auth/signup"
 TEACHERS = "/api/v1/teachers"
 SUBJECTS = "/api/v1/subjects"
@@ -80,7 +82,7 @@ def test_the_name_follows_the_user_record(client):
 
 def test_a_teachers_classes_appear_on_their_record(client):
     c = cast(client)
-    client.post(CLASSES, json={"name": "Nursery", "color_slot": 0}, headers=auth(c["asha"]))
+    helpers.make_class(client, c["asha"], "Nursery", principal=c["head"])
 
     body = client.get(f"{TEACHERS}/me", headers=auth(c["asha"])).json()
 
@@ -513,9 +515,9 @@ def test_deleting_a_subject_removes_it_from_teachers(client):
 
 def test_the_principal_moves_a_class_to_another_teacher(client):
     c = cast(client)
-    class_id = client.post(
-        CLASSES, json={"name": "Nursery", "color_slot": 0}, headers=auth(c["asha"])
-    ).json()["class_id"]
+    class_id = helpers.make_class(
+        client, c["asha"], "Nursery", principal=c["head"]
+    )
 
     response = client.patch(
         f"{CLASSES}/{class_id}/teacher",
@@ -534,20 +536,10 @@ def test_the_principal_moves_a_class_to_another_teacher(client):
 
 def test_the_students_move_with_the_class(client):
     c = cast(client)
-    class_id = client.post(
-        CLASSES, json={"name": "Nursery", "color_slot": 0}, headers=auth(c["asha"])
-    ).json()["class_id"]
-    client.post(
-        "/api/v1/students",
-        json={
-            "class_id": class_id,
-            "name": "Diya",
-            "date_of_birth": "2021-04-12",
-            "gender": "Female",
-            "address": "12 Rose Lane",
-        },
-        headers=auth(c["asha"]),
+    class_id = helpers.make_class(
+        client, c["asha"], "Nursery", principal=c["head"]
     )
+    helpers.add_student(client, c["head"], class_id, "Diya")
 
     client.patch(
         f"{CLASSES}/{class_id}/teacher",
@@ -564,9 +556,9 @@ def test_the_students_move_with_the_class(client):
 
 def test_a_teacher_cannot_reassign_a_class(client):
     c = cast(client)
-    class_id = client.post(
-        CLASSES, json={"name": "Nursery", "color_slot": 0}, headers=auth(c["asha"])
-    ).json()["class_id"]
+    class_id = helpers.make_class(
+        client, c["asha"], "Nursery", principal=c["head"]
+    )
 
     response = client.patch(
         f"{CLASSES}/{class_id}/teacher",
@@ -580,10 +572,12 @@ def test_a_teacher_cannot_reassign_a_class(client):
 def test_reassigning_into_a_name_clash_is_refused(client):
     """uq_classes_teacher_name is per teacher, so the receiver may have one."""
     c = cast(client)
-    class_id = client.post(
-        CLASSES, json={"name": "Nursery", "color_slot": 0}, headers=auth(c["asha"])
-    ).json()["class_id"]
-    client.post(CLASSES, json={"name": "Nursery", "color_slot": 1}, headers=auth(c["bela"]))
+    class_id = helpers.make_class(
+        client, c["asha"], "Nursery", principal=c["head"]
+    )
+    helpers.make_class(
+        client, c["bela"], "Nursery", color_slot=1, principal=c["head"]
+    )
 
     response = client.patch(
         f"{CLASSES}/{class_id}/teacher",
@@ -598,9 +592,9 @@ def test_reassigning_into_a_name_clash_is_refused(client):
 
 def test_reassigning_to_the_current_teacher_is_not_an_error(client):
     c = cast(client)
-    class_id = client.post(
-        CLASSES, json={"name": "Nursery", "color_slot": 0}, headers=auth(c["asha"])
-    ).json()["class_id"]
+    class_id = helpers.make_class(
+        client, c["asha"], "Nursery", principal=c["head"]
+    )
 
     response = client.patch(
         f"{CLASSES}/{class_id}/teacher",
@@ -614,9 +608,9 @@ def test_reassigning_to_the_current_teacher_is_not_an_error(client):
 
 def test_assigning_to_a_teacher_that_does_not_exist_is_a_404(client):
     c = cast(client)
-    class_id = client.post(
-        CLASSES, json={"name": "Nursery", "color_slot": 0}, headers=auth(c["asha"])
-    ).json()["class_id"]
+    class_id = helpers.make_class(
+        client, c["asha"], "Nursery", principal=c["head"]
+    )
 
     response = client.patch(
         f"{CLASSES}/{class_id}/teacher",
