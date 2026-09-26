@@ -146,6 +146,8 @@ which the app shows directly in a SnackBar.
 | POST | `/google` | `id_token` | 200 + token |
 | GET | `/me` | — (Bearer token) | 200 + user |
 | PATCH | `/me` | `full_name` and/or `account_type` (Bearer token) | 200 + user |
+| POST | `/me/contact/request` | `channel` (`phone`/`email`), `value` (Bearer token) | 200 + `expires_in_seconds`. **Changes nothing yet** |
+| POST | `/me/contact/verify` | `channel`, `otp` (Bearer token) | 200 + user, with the new contact on it |
 
 `identifier` is either an email address or a phone number — the server works out
 which, so the app's single "Email id / Phone Number" field maps straight
@@ -259,6 +261,27 @@ single-use, and requesting a new one is rate-limited to once per 30 seconds.
 To go live, replace the `# TODO: send code over SMS` line in
 [app/routers/auth.py](app/routers/auth.py) with an MSG91/Twilio call and set
 `OTP_DEBUG_RETURN=false`.
+
+### Changing a contact you already have
+
+`PATCH /me` fills in a **missing** email or phone. **Replacing** one goes
+through `/me/contact/request` and `/me/contact/verify` instead, and the typed
+value waits in `contact_change_codes` until the code comes back — `users.email`
+and `users.phone` are not touched before that.
+
+This is not caution for its own sake. `users.phone` is what `/otp/verify` and
+`/login` look an account up by, so writing an unproven number there makes it the
+number the person has to log in with, while `is_phone_verified = false` records,
+too late, that nobody ever proved they could receive anything at it. One typo
+and the account is unreachable by the flow the app opens on.
+
+The codes are the same shape as an OTP — hashed, 5 minutes, 5 attempts,
+single-use, one per 30 seconds — but a **separate table**, for the reason
+`password_reset_codes` is separate: an `OtpCode` is redeemable for a login token
+and resolves the account from the number in the request, so a code that could be
+either kind could be spent creating a second account for the new number. The
+email half logs its code exactly as SMS does; there is no email provider wired
+up either.
 
 ## Connecting the app
 

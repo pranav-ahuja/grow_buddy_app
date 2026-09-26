@@ -8,9 +8,18 @@ from sqlalchemy.orm import Session
 from app.accounts import apply_role, new_user
 from app.config import settings
 from app.deps import CurrentUser, DbSession
-from app.models import ACCOUNT_TYPE_TO_ROLE, OtpCode, User
+from app.models import (
+    ACCOUNT_TYPE_TO_ROLE,
+    CONTACT_CHANNEL_PHONE,
+    ContactChangeCode,
+    OtpCode,
+    User,
+)
 from app.google_auth import GoogleAuthError, GoogleProfile, verify_google_id_token
 from app.schemas import (
+    ContactChangeRequest,
+    ContactChangeResponse,
+    ContactChangeVerifyRequest,
     GoogleLoginRequest,
     LoginRequest,
     OtpRequest,
@@ -391,3 +400,194 @@ def _reject_taken(db: Session, clause, current_user: User, what: str) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail=f"That {what} is already used by another account",
         )
+
+
+@router.post("/me/contact/request", response_model=ContactChangeResponse)
+def request_contact_change(
+    payload: ContactChangeRequest, current_user: CurrentUser, db: DbSession
+) -> ContactChangeResponse:
+    """Send a code to an email or number the signed-in user wants to move to.
+
+    **Nothing on `users` changes here.** The value is parked on a
+    `contact_change_codes` row and only reaches the account when
+    `verify_contact_change` redeems the code. Until then the old email and
+    number are still what sign-in looks up, which is the point: a mistyped
+    number that is never confirmed costs the user a second attempt, not their
+    way back into the account.
+
+    Authenticated, unlike `/auth/otp/request`. That route has to be open —
+    it is how phone login starts — and it finds the account from the number in
+    the request. This one already knows whose contact is changing, so the
+    number in the request is a claim about the future, not a lookup key.
+    """
+    now = utcnow()
+    channel = payload.channel
+    value = payload.value
+
+    current = (
+        current_user.phone if channel == CONTACT_CHANNEL_PHONE else current_user.email
+    )
+    if current is not None and current == value:
+        # Not an error worth a 409: there is simply nothing to prove. Telling
+        # the user their number is already their number is more useful than
+        # sending them a code to confirm a change that is not one.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "That is already your phone number"
+                if channel == CONTACT_CHANNEL_PHONE
+                else "That is already your email address"
+            ),
+        )
+
+    # Checked now so the user is told before waiting for a code that can never
+    # be redeemed. Checked *again* at verify time, because these rows are
+    # unique and somebody else may sign up with it in between — the same reason
+    # app/approvals.py re-validates a request when it is granted.
+    _reject_contact_taken(db, channel, value, current_user)
+
+    latest = db.scalar(
+        select(ContactChangeCode)
+        .where(
+            ContactChangeCode.user_id == current_user.user_id,
+            ContactChangeCode.channel == channel,
+        )
+        .order_by(ContactChangeCode.created_at.desc(), ContactChangeCode.id.desc())
+    )
+    if latest is not None:
+        elapsed = (now - latest.created_at).total_seconds()
+        if latest.consumed_at is None and elapsed < OTP_RESEND_COOLDOWN_SECONDS:
+            # The same cooldown, from the same constant, as phone login: a code
+            # costs an SMS whoever asked for it, and the app's resend timer
+            # counts down from this number.
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    "Please wait "
+                    f"{int(OTP_RESEND_COOLDOWN_SECONDS - elapsed)}s "
+                    "before requesting another code"
+                ),
+            )
+
+    # Retire this user's outstanding codes on this channel, so only the newest
+    # can be redeemed — and so changing the number twice cannot leave the first
+    # attempt's code still able to commit the first number.
+    for stale in db.scalars(
+        select(ContactChangeCode).where(
+            ContactChangeCode.user_id == current_user.user_id,
+            ContactChangeCode.channel == channel,
+            ContactChangeCode.consumed_at.is_(None),
+        )
+    ):
+        stale.consumed_at = now
+
+    code = generate_otp()
+    db.add(
+        ContactChangeCode(
+            user_id=current_user.user_id,
+            channel=channel,
+            new_value=value,
+            code_hash=hash_otp(code),
+            expires_at=now + timedelta(minutes=settings.otp_expire_minutes),
+        )
+    )
+    db.commit()
+
+    # TODO: send `code` over SMS (MSG91 / Twilio) or email (SES / SMTP) instead
+    # of logging it — the same gap request_otp() has, and the same reason
+    # OTP_DEBUG_RETURN exists.
+    logger.info("Contact-change code for %s (%s) is %s", value, channel, code)
+
+    return ContactChangeResponse(
+        message="Verification code sent",
+        channel=channel,
+        value=value,
+        expires_in_seconds=settings.otp_expire_minutes * 60,
+        debug_otp=code if settings.otp_debug_return else None,
+    )
+
+
+@router.post("/me/contact/verify", response_model=UserOut)
+def verify_contact_change(
+    payload: ContactChangeVerifyRequest, current_user: CurrentUser, db: DbSession
+) -> User:
+    """Redeem a code and move the contact onto the account.
+
+    This is the write that makes the new email or number the one sign-in uses,
+    and it is deliberately the only one: the value committed is the value the
+    code was issued for, read off the row, never re-read from the request.
+
+    A phone change also sets `is_phone_verified`, which is the honest meaning of
+    that flag — a code reached the number and came back. `PATCH /auth/me` clears
+    it because a number typed into a form proves nothing; this route is the
+    proof.
+    """
+    now = utcnow()
+    channel = payload.channel
+
+    record = db.scalar(
+        select(ContactChangeCode)
+        .where(
+            ContactChangeCode.user_id == current_user.user_id,
+            ContactChangeCode.channel == channel,
+            ContactChangeCode.consumed_at.is_(None),
+        )
+        .order_by(ContactChangeCode.created_at.desc(), ContactChangeCode.id.desc())
+    )
+
+    if record is None or not record.is_usable(now, settings.otp_max_attempts):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This code has expired. Please request a new one.",
+        )
+
+    if not verify_otp(payload.otp, record.code_hash):
+        record.attempts += 1
+        db.commit()
+        remaining = settings.otp_max_attempts - record.attempts
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Incorrect code. {remaining} attempt(s) left."
+                if remaining > 0
+                else "Too many incorrect attempts. Please request a new code."
+            ),
+        )
+
+    # Re-checked against the school as it is now, not as it was when the code
+    # was sent. Both columns are unique, so an address claimed in between would
+    # otherwise turn a correct code into a 500 from the database.
+    _reject_contact_taken(db, channel, record.new_value, current_user)
+
+    record.consumed_at = now
+
+    if channel == CONTACT_CHANNEL_PHONE:
+        current_user.phone = record.new_value
+        # Earned, not assumed: a code went to this number and came back.
+        current_user.is_phone_verified = True
+    else:
+        current_user.email = record.new_value
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+def _reject_contact_taken(
+    db: Session, channel: str, value: str, current_user: User
+) -> None:
+    """409 when another account already holds this email or number.
+
+    Shares its reasoning with `_reject_taken`, but not its signature: this one
+    picks the column from the channel, so the caller cannot accidentally check
+    the email column for a phone change.
+    """
+    clause = (
+        User.phone == value if channel == CONTACT_CHANNEL_PHONE else User.email == value
+    )
+    _reject_taken(
+        db,
+        clause,
+        current_user,
+        "phone number" if channel == CONTACT_CHANNEL_PHONE else "email address",
+    )

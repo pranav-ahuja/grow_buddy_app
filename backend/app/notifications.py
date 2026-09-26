@@ -149,6 +149,23 @@ def request_raised_message(*, teacher_name: str, summary: str) -> str:
     return f"{teacher_name} requests approval for {summary}"
 
 
+def student_registered_message(
+    *, teacher_name: str, student_name: str, class_name: str
+) -> str:
+    """What the principal sees when a teacher registers a pupil themselves.
+
+    Past tense, and deliberately so: registering a pupil stopped being a
+    request on 2026-09-26 and became something a teacher does, so this line
+    reports a fact rather than asking for one. It is raised with no
+    `request_id`, which is what keeps Approve and Reject off it — there is
+    nothing left to decide.
+
+    The teacher's name comes first, as it does in the request sentences, because
+    the tab is scanned by who did something.
+    """
+    return f'{teacher_name} registered {student_name} in "{class_name}"'
+
+
 def request_approved_message(*, decided_by: str, summary: str) -> str:
     return f"{decided_by} approved your request for {summary}"
 

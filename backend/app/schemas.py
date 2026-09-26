@@ -10,6 +10,9 @@ from app.models import (
     ACCOUNT_TYPE_TEACHER,
     ATTENDANCE_ABSENT,
     ATTENDANCE_PRESENT,
+    CONTACT_CHANNEL_EMAIL,
+    CONTACT_CHANNEL_PHONE,
+    CONTACT_CHANNELS,
 )
 from app.security import MAX_PASSWORD_BYTES
 
@@ -961,3 +964,85 @@ class NotificationListOut(BaseModel):
     # The principal's queue depth, and **zero for everyone else** — a teacher
     # has no business knowing how many requests the school is sitting on.
     pending_requests: int
+
+
+class ContactChangeRequest(BaseModel):
+    """"Send a code to this address or number, which I say is mine."
+
+    The channel is explicit rather than sniffed from the value. Deciding
+    "anything with an @ is an email" means a mistyped email is treated as a
+    phone number and rejected with a message about phone numbers — and, worse,
+    that the column a verified code writes to is chosen by a regex rather than
+    by what the caller asked for.
+    """
+
+    channel: str
+    value: str = Field(min_length=3, max_length=255)
+
+    @field_validator("channel")
+    @classmethod
+    def _known_channel(cls, value: str) -> str:
+        channel = value.strip().lower()
+        if channel not in CONTACT_CHANNELS:
+            raise ValueError("channel must be 'phone' or 'email'")
+        return channel
+
+    @model_validator(mode="after")
+    def _normalize_value(self) -> "ContactChangeRequest":
+        """Normalised here, so the value that is stored, the value a code is
+        sent to, and the value a later login is looked up by are one string.
+
+        Phone through normalize_phone and email lower-cased — exactly what
+        OtpRequest and ProfileUpdateRequest already do to the same two fields.
+        A second rule for the same column is how "+91 98765 43210" becomes an
+        account nobody can log into.
+        """
+        if self.channel == CONTACT_CHANNEL_PHONE:
+            phone = normalize_phone(self.value)
+            if not is_valid_phone(phone):
+                raise ValueError("Enter a valid phone number, e.g. +919876543210")
+            object.__setattr__(self, "value", phone)
+        else:
+            email = self.value.strip().lower()
+            if not looks_like_email(email):
+                raise ValueError("Enter a valid email address")
+            object.__setattr__(self, "value", email)
+        return self
+
+
+class ContactChangeVerifyRequest(BaseModel):
+    """The code, and which pending change it is for.
+
+    No value field: the value being confirmed is the one the code was issued
+    for, which is on the row. Taking it from the caller again would let a code
+    sent to one address be redeemed against another.
+    """
+
+    channel: str
+    otp: str = Field(min_length=4, max_length=8)
+
+    @field_validator("channel")
+    @classmethod
+    def _known_channel(cls, value: str) -> str:
+        channel = value.strip().lower()
+        if channel not in CONTACT_CHANNELS:
+            raise ValueError("channel must be 'phone' or 'email'")
+        return channel
+
+
+class ContactChangeResponse(BaseModel):
+    """What the app needs to draw the code step.
+
+    `value` is echoed so the screen can say "we sent a code to +9190…01"
+    against the number the server actually stored, not the one the field
+    happens to still hold.
+    """
+
+    message: str
+    channel: str
+    value: str
+    expires_in_seconds: int
+    # Populated only while OTP_DEBUG_RETURN is on, as on OtpRequestResponse —
+    # there is no SMS or email provider wired up yet, so without this the flow
+    # could not be exercised at all. Never set in production.
+    debug_otp: str | None = None

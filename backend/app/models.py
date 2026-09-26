@@ -926,3 +926,90 @@ class Notification(Base):
     read_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# Which contact a pending change is for. The channel is stored rather than
+# inferred from the value's shape: "does it contain an @" is a guess, and a
+# guess is how a phone code ends up redeemed against an email address.
+CONTACT_CHANNEL_PHONE = "phone"
+CONTACT_CHANNEL_EMAIL = "email"
+
+CONTACT_CHANNELS = (CONTACT_CHANNEL_PHONE, CONTACT_CHANNEL_EMAIL)
+
+_CONTACT_CHANNEL_LIST = "', '".join(CONTACT_CHANNELS)
+
+
+class ContactChangeCode(Base):
+    """A one-time code proving somebody owns the email or number they are
+    moving their own account to.
+
+    **Its own table, for the reason PasswordResetCode gives.** An `OtpCode` is
+    redeemable for a full login token, and `/auth/otp/verify` finds the account
+    *by the number in the request* — so a code issued to prove a new number
+    could otherwise be spent creating a second account for it, or logging into
+    the account of whoever already holds it. This one is keyed by `user_id`,
+    carries the value it was issued for, and can do exactly one thing: move
+    that contact onto that user.
+
+    **The new value lives here, not on `users`.** It is what the signed-in user
+    typed, and it is not a fact about them until a code sent to it comes back.
+    Writing it to `users.phone` first and marking it unverified would make the
+    unproven number the one they have to log in with — which is how a typo
+    locks somebody out of an account they can still see on screen. So the
+    column on `users` does not move until `consumed_at` is set here.
+
+    `attempts` and `expires_at` do the same job, under the same settings, as
+    they do on an OtpCode: a code is guessable in six digits, so it has to run
+    out of both time and tries.
+    """
+
+    __tablename__ = "contact_change_codes"
+    __table_args__ = (
+        CheckConstraint(
+            f"channel IN ('{_CONTACT_CHANNEL_LIST}')",
+            name="ck_contact_change_codes_channel",
+        ),
+        # The lookup every request and verify does: this user's outstanding code
+        # for this channel, newest first.
+        Index(
+            "ix_contact_change_codes_user_channel",
+            "user_id",
+            "channel",
+            "consumed_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # CASCADE, like every other row hanging off an account: a deleted user's
+    # half-finished contact change has nothing left to be about.
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), index=True
+    )
+
+    channel: Mapped[str] = mapped_column(String(16))
+
+    # Normalised on the way in — a phone through normalize_phone, an email
+    # lower-cased — so what is committed to `users` is what a later login will
+    # be looked up by. Stored wide enough for an email, which is the longer of
+    # the two.
+    new_value: Mapped[str] = mapped_column(String(255))
+
+    code_hash: Mapped[str] = mapped_column(String(255))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    def is_usable(self, now: datetime, max_attempts: int) -> bool:
+        """Deliberately the same three conditions as OtpCode.is_usable.
+
+        Kept as its own copy rather than shared through a mixin: the two tables
+        are separate on purpose, and a shared base class is the seam along which
+        "an OTP is an OTP" creeps back in.
+        """
+        return (
+            self.consumed_at is None
+            and self.expires_at > now
+            and self.attempts < max_attempts
+        )
