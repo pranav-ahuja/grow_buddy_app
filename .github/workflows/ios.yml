@@ -1,0 +1,133 @@
+
+# Builds the iOS app on a GitHub-hosted macOS runner.
+#
+# This exists because iOS cannot be built on the Windows machine this project is
+# developed on: Flutter offers no `ios` build target there, since compiling for
+# iOS requires Xcode and Xcode is macOS-only. This workflow is the substitute --
+# push, and a macOS runner does the part the laptop cannot.
+#
+# What it produces today is an UNSIGNED .app. That is enough to prove the app
+# compiles for iOS and to run it in a simulator, and it needs no Apple
+# credentials at all. Installing on a real iPhone, TestFlight and the App Store
+# all need a signed .ipa -- see "Signing" at the bottom of this file.
+
+name: iOS
+
+on:
+  push:
+    branches: [main]
+    # Skip runs that cannot change the build result. macOS runner minutes bill
+    # at 10x the Linux rate on private repos, so this is worth keeping tight.
+    paths-ignore:
+      - 'docs/**'
+      - 'backend/**'
+      - 'testcases/**'
+      - '**/*.md'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'backend/**'
+      - 'testcases/**'
+      - '**/*.md'
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: 'Backend URL to compile in (blank = the committed default in GB_Constants.dart)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    name: Build unsigned .app
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      # Pinned to the version this project is developed against. The SDK on the
+      # dev machine is held at 3.32.2 deliberately and must not be pulled
+      # forward, so CI tracking "latest stable" would eventually build something
+      # nobody can reproduce locally.
+      - name: Set up Flutter 3.32.2
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.2'
+          channel: stable
+          cache: true
+
+      - name: Show toolchain
+        run: |
+          flutter --version
+          xcodebuild -version
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      # Infos are not fatal: the project uses a GB_ prefix and Snake_Case by
+      # choice, which the default lints flag ~215 times. Errors and warnings
+      # still fail the build, which is the part worth gating on.
+      #
+      # Scoped to the code that goes into the app. testcases/ is the unit and
+      # widget suite: it is not part of the .app, and this workflow already
+      # ignores changes to it (paths-ignore above), so errors there must not
+      # block an iOS build.
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos lib integration_test
+
+      # kApiBaseUrl is a String.fromEnvironment, so the backend address is a
+      # build flag rather than a source edit. Set the GB_API_BASE_URL repository
+      # variable to point CI builds at a reachable backend -- typically the
+      # Tailscale URL, since it is the only one that works off the LAN and the
+      # only one iOS App Transport Security accepts without a plist exception.
+      - name: Build iOS (unsigned)
+        env:
+          API_BASE_URL: ${{ inputs.api_base_url || vars.GB_API_BASE_URL }}
+        run: |
+          if [ -n "$API_BASE_URL" ]; then
+            echo "Building against $API_BASE_URL"
+            flutter build ios --release --no-codesign \
+              --dart-define=GB_API_BASE_URL="$API_BASE_URL"
+          else
+            echo "Building against the committed default in GB_Constants.dart"
+            flutter build ios --release --no-codesign
+          fi
+
+      - name: Package the .app
+        run: |
+          cd build/ios/iphoneos
+          zip -r -y "$GITHUB_WORKSPACE/GrowBuddy-ios-unsigned.zip" Runner.app
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: growbuddy-ios-unsigned
+          path: GrowBuddy-ios-unsigned.zip
+          retention-days: 14
+          if-no-files-found: error
+
+# ---------------------------------------------------------------------------
+# Signing -- what to add when you want an installable .ipa
+# ---------------------------------------------------------------------------
+#
+# An unsigned .app cannot be installed on a phone. For that you need a signed
+# .ipa, which means giving CI the same credentials Xcode would use locally:
+#
+#   1. In the Apple Developer portal, register an App ID matching
+#      PRODUCT_BUNDLE_IDENTIFIER in ios/Runner.xcodeproj/project.pbxproj.
+#   2. Create a distribution certificate (.p12) and a provisioning profile
+#      (.mobileprovision) for that App ID.
+#   3. Add them as repository secrets, base64-encoded:
+#        BUILD_CERTIFICATE_BASE64, P12_PASSWORD,
+#        PROVISIONING_PROFILE_BASE64, KEYCHAIN_PASSWORD, APPLE_TEAM_ID
+#   4. Import them into a temporary keychain before the build step, then swap
+#      `flutter build ios --no-codesign` for `flutter build ipa
+#      --export-options-plist=ios/ExportOptions.plist`.
+#
+# Apple's own guide covers step 4 in full:
+# https://docs.github.com/actions/deployment/deploying-xcode-applications/installing-an-apple-certificate-on-macos-runners-for-xcode-development
+#
+# This is deliberately left unconfigured rather than half-written: a signing
+# pipeline that cannot be tested without your certificates would be guesswork.

@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_Dashboard.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_CompleteProfile.dart';
-import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_Login.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_LoginSignUp/GB_MobileLogin.dart';
 import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
 import 'package:grow_buddy_app/GB_Services/GB_AuthApi.dart';
 import 'package:grow_buddy_app/GB_Services/GB_GoogleSignIn.dart';
@@ -49,9 +49,11 @@ void gRouteAfterAuth(BuildContext context, GB_AuthResult result) {
 /// [GB_CompleteProfile], because both mean the same thing: this device is no
 /// longer signed in as anybody.
 ///
-/// Lands on [GB_Login] rather than onboarding: someone who just logged out has
-/// already seen the intro, and what they want next is the form — either to sign
-/// back in or to reach sign-up, which the login page links to.
+/// Lands on [GB_MobileLogin] rather than onboarding: someone who just logged
+/// out has already seen the intro, and what they want next is the form —
+/// either to sign back in or to reach sign-up, which it links to. Phone login
+/// is the default entry point, and it carries links on to Google and to the
+/// password form for accounts that use those.
 ///
 /// The Google sign-out matters even for a phone login — if the user arrived via
 /// Google, skipping it leaves the account cached, and the next sign-in silently
@@ -68,9 +70,62 @@ Future<void> gSignOut(BuildContext context) async {
   await gClearSession();
 
   navigator.pushAndRemoveUntil(
-    MaterialPageRoute(builder: (context) => const GB_Login()),
+    MaterialPageRoute(builder: (context) => const GB_MobileLogin()),
     (route) => false,
   );
+}
+
+/// Asks before ending the session, and signs out only on an explicit "Logout".
+///
+/// Signing out is cheap to trigger and expensive to undo: nothing is lost, but
+/// getting back in means a password or waiting on an OTP, which is a real
+/// interruption mid-lesson. So it asks twice, for the same reason
+/// `gConfirmDeleteClass` does.
+///
+/// Kept here beside [gSignOut] rather than in the screen that calls it, so a
+/// second "Logout" added elsewhere gets the confirmation by default instead of
+/// having to remember it.
+Future<void> gConfirmAndSignOut(BuildContext context) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      backgroundColor: kPrimaryColor2,
+      title: const Text("Log out?"),
+      titleTextStyle: const TextStyle(
+        fontSize: kClassAppBarTitleSize,
+        fontWeight: FontWeight.w500,
+        color: kHomeTitleTextColor,
+      ),
+      content: const Text(
+        "You'll need to sign in again to get back to your classes. "
+        "Nothing is deleted.",
+        style: TextStyle(
+          fontSize: kEventSubtitleTextSize,
+          height: 1.4,
+          color: kHomeSubtitleTextColor,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          style: TextButton.styleFrom(foregroundColor: kHomeSubtitleTextColor),
+          child: const Text("Cancel"),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          style: TextButton.styleFrom(
+            foregroundColor: Theme.of(context).colorScheme.error,
+          ),
+          child: const Text("Logout"),
+        ),
+      ],
+    ),
+  );
+
+  // Null is a dismissal — tapping outside the dialog is not consent.
+  if (confirmed != true || !context.mounted) return;
+
+  await gSignOut(context);
 }
 
 /// Guards against a second Google flow being launched while one is open — the

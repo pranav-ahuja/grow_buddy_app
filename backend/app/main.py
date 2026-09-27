@@ -7,8 +7,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.database import create_schema, engine
-from app.routers import auth, classes
+from app.database import engine
+from app.migrations import require_current
+from app.routers import (
+    approvals,
+    attendance,
+    auth,
+    classes,
+    guardians,
+    subjects,
+    teachers,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -25,9 +34,9 @@ async def lifespan(app: FastAPI):
             "response and printed below. Development only."
         )
 
-    # Fine while the schema is small and changing daily. Switch to Alembic
-    # migrations before there is production data worth keeping.
-    create_schema(engine)
+    # The schema is Alembic's now. This only checks; it never migrates — see
+    # app/migrations.py for why applying one stays a command someone runs.
+    require_current(engine)
     yield
 
 
@@ -73,3 +82,10 @@ def health() -> dict[str, str]:
 
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(classes.router, prefix=settings.api_prefix)
+app.include_router(subjects.router, prefix=settings.api_prefix)
+app.include_router(attendance.router, prefix=settings.api_prefix)
+app.include_router(teachers.router, prefix=settings.api_prefix)
+app.include_router(guardians.router, prefix=settings.api_prefix)
+# The approval queue and the notification tab. Last, because everything
+# above it is what raises the requests it answers.
+app.include_router(approvals.router, prefix=settings.api_prefix)

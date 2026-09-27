@@ -201,18 +201,26 @@ class _GB_SignUpState extends State<GB_SignUp> {
                               borderRadius: BorderRadius.circular(50.0),
                             ),
                           ),
+                          // From kAccountTypeOptions in GB_Constants, so this
+                          // screen cannot end up offering a different set of
+                          // roles than the profile screen does.
                           dropdownMenuEntries: [
-                            DropdownMenuEntry(
-                                value: "Teacher", label: "Teacher"),
-                            DropdownMenuEntry(
-                                value: "Student", label: "Student"),
+                            for (final GB_AccountTypeOption option
+                                in kAccountTypeOptions)
+                              DropdownMenuEntry<String>(
+                                value: option.label,
+                                label: option.label,
+                                leadingIcon: Icon(option.icon),
+                              ),
                           ],
                           label: Text("Account Type"),
                           onSelected: (value) {
-                            if (value == "Teacher") {
-                              accountType = accountTypeTeacher;
-                            } else if (value == "Student") {
-                              accountType = accountTypeStudent;
+                            for (final GB_AccountTypeOption option
+                                in kAccountTypeOptions) {
+                              if (option.label == value) {
+                                accountType = option.value;
+                                return;
+                              }
                             }
                           },
                         ),

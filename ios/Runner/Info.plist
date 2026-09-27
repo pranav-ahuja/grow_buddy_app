@@ -45,5 +45,33 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!--
+	  Google Sign-In on iOS needs two things that are NOT here yet, because
+	  the iOS OAuth client has not been created (kGoogleIosClientId in
+	  GB_Constants.dart is still empty). The app builds and runs without
+	  them; only the Google button is affected; phone OTP and
+	  email/password are unaffected.
+
+	  When the iOS client exists in Google Cloud Console, add:
+
+	    <key>CFBundleURLTypes</key>
+	    <array>
+	      <dict>
+	        <key>CFBundleURLSchemes</key>
+	        <array>
+	          <string>REVERSED_CLIENT_ID_GOES_HERE</string>
+	        </array>
+	      </dict>
+	    </array>
+
+	  The reversed client id is the iOS client id with its two
+	  dot-separated halves swapped, e.g. 123-abc.apps.googleusercontent.com
+	  becomes com.googleusercontent.apps.123-abc. Without it the Google
+	  flow cannot hand control back to the app after the browser step.
+
+	  No ATS exception is needed as long as the app talks to the backend
+	  over the Tailscale https:// URL. A plain http:// address would need
+	  NSAppTransportSecurity here; see docs/Tailscale_porting.md.
+	-->
 </dict>
 </plist>

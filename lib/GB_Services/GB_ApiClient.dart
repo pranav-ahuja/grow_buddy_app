@@ -89,13 +89,41 @@ class GB_ApiClient {
     return items.cast<Map<String, dynamic>>();
   }
 
-  /// A DELETE. The backend answers these with 204 and no body, so there is
-  /// nothing to return — success is simply not throwing.
+  static Future<Map<String, dynamic>> putJson(
+    String url,
+    Map<String, dynamic> body, {
+    String? token,
+  }) async {
+    return _send(
+      () => client.put(
+        Uri.parse(url),
+        headers: _headers(token: token),
+        body: jsonEncode(body),
+      ),
+    );
+  }
+
+  /// A DELETE whose reply is ignored — success is simply not throwing.
+  ///
+  /// Kept for the routes that still answer 204. Where the answer matters, use
+  /// [deleteJson]: since the approval queue arrived, deleting a class or a
+  /// pupil can come back either "done" or "waiting for the principal", and
+  /// that is a body to read rather than a status to assume.
   static Future<void> delete(
     String url, {
     String? token,
   }) async {
     await _send(
+      () => client.delete(Uri.parse(url), headers: _headers(token: token)),
+    );
+  }
+
+  /// A DELETE that returns what the server said.
+  static Future<Map<String, dynamic>> deleteJson(
+    String url, {
+    String? token,
+  }) async {
+    return _send(
       () => client.delete(Uri.parse(url), headers: _headers(token: token)),
     );
   }

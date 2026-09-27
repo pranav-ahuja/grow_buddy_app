@@ -63,10 +63,19 @@ class GB_ClassRowCard extends StatelessWidget {
     super.key,
     required this.child,
     this.onTap,
+    this.onLongPress,
   });
 
   final Widget child;
   final VoidCallback? onTap;
+
+  /// The card's secondary action, where it has one.
+  ///
+  /// Long press rather than a second visible control: these cards are 96pt
+  /// wide in a horizontal strip, and the only thing behind this today is
+  /// removing a pupil — which is irreversible and should not sit a few pixels
+  /// from "open".
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +84,7 @@ class GB_ClassRowCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(kFeatureCardRadius),
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(kFeatureCardRadius),
         child: Container(
           width: kFeatureCardWidth,
@@ -151,15 +161,22 @@ class GB_StudentCard extends StatelessWidget {
     super.key,
     required this.student,
     this.onTap,
+    this.onLongPress,
   });
 
   final GB_Student student;
   final VoidCallback? onTap;
 
+  /// Held down to remove the pupil — or, for a teacher, to ask the principal
+  /// to. Null where the viewer may do neither, which draws no action at all
+  /// rather than one that refuses.
+  final VoidCallback? onLongPress;
+
   @override
   Widget build(BuildContext context) {
     return GB_ClassRowCard(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -172,48 +189,47 @@ class GB_StudentCard extends StatelessWidget {
                 ? AssetImage(student.imagePath) as ImageProvider
                 : FileImage(File(student.photoPath!)),
           ),
-          const SizedBox(height: 8.0),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  student.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: kStudentNameTextSize,
-                    fontWeight: FontWeight.w500,
-                    color: kTextColor,
-                  ),
-                ),
-                // The roll number and student id, not the age: the card is an
-                // index into the class, and these are what a teacher calls a
-                // pupil by and looks them up by. Everything else the form
-                // collects lives on the profile.
-                if (student.rollNumber != null)
+          const SizedBox(height: kStudentCardGap),
+          // The card is a fixed height, and the photo plus two lines of text
+          // only just fill it at the default text size. A phone set to a
+          // larger font overflowed it by a few points once the roll-number
+          // line appeared, so the text here is capped a little above normal
+          // and set in a fixed line height rather than the font's own. The
+          // rest of the app still follows the system size.
+          MediaQuery.withClampedTextScaling(
+            maxScaleFactor: kStudentCardMaxTextScale,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    "Roll No. ${student.rollNumber}",
+                    student.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: kStudentIdTextSize,
+                      fontSize: kStudentNameTextSize,
+                      height: kStudentCardLineHeight,
                       fontWeight: FontWeight.w500,
-                      color: kHomeTitleTextColor,
+                      color: kTextColor,
                     ),
                   ),
-                Text(
-                  student.studentId,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: kStudentIdTextSize,
-                    letterSpacing: 0.4,
-                    color: kHomeSubtitleTextColor,
-                  ),
-                ),
-              ],
+                  // The roll number, not the ST_ id: it is what a teacher
+                  // calls a pupil by, while the id is a database key.
+                  if (student.rollNumber != null)
+                    Text(
+                      "Roll No. ${student.rollNumber}",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: kStudentIdTextSize,
+                        height: kStudentCardLineHeight,
+                        fontWeight: FontWeight.w500,
+                        color: kHomeTitleTextColor,
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ],

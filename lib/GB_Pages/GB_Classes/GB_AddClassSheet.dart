@@ -3,13 +3,15 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassArchive.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassArchiveFile.dart';
-import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassStore.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassWidgets.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentStore.dart';
 import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
+import 'package:grow_buddy_app/GB_Services/GB_ClassApi.dart';
+import 'package:grow_buddy_app/GB_Services/GB_TeacherApi.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Buttons.dart';
+import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Globals.dart';
 
 /// The "add a class" form, shown as a bottom sheet from the dashboard.
 ///
@@ -23,13 +25,20 @@ import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Elevated_Butt
 /// with a file attached, rather than a second screen that does almost the same
 /// thing.
 ///
-/// Call [show]; it returns the created class, or null if the teacher backed
-/// out, so the caller can react (the dashboard confirms with a snackbar).
+/// **The principal gets one extra field: who is to teach it.** They create
+/// classes for the whole school, so the class has to be filed under somebody —
+/// or under nobody, which is the "Unassigned" option and a real answer in
+/// August, before anyone has been given their year. A teacher never sees the
+/// field: their class is theirs, and a picker that let them file one under a
+/// colleague would be a way to put work on someone else's dashboard.
+///
+/// Call [show]; it returns what the server did — a class created, or a request
+/// now waiting on the principal — or null if the sheet was dismissed.
 class GB_AddClassSheet extends StatefulWidget {
   const GB_AddClassSheet({super.key});
 
-  static Future<GB_ClassInfo?> show(BuildContext context) {
-    return showModalBottomSheet<GB_ClassInfo>(
+  static Future<GB_ActionResult?> show(BuildContext context) {
+    return showModalBottomSheet<GB_ActionResult>(
       context: context,
       backgroundColor: kPrimaryColor2,
       // The keyboard would otherwise cover the field and the button; this lets
@@ -74,6 +83,44 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
   /// True while the class is being sent to the server, so a second tap on a
   /// slow connection cannot create it twice.
   bool _isSaving = false;
+
+  /// The school's teachers, for the principal's picker. Null while they are
+  /// still on their way; empty means a school with no teachers signed up yet,
+  /// which is a real state and not an error — the class is created
+  /// unassigned.
+  List<GB_TeacherSummary>? _teachers;
+
+  /// Who is to teach the new class. Null is **Unassigned**, which is both the
+  /// default and a legitimate answer.
+  String? _teacherId;
+
+  /// Only the principal chooses; a teacher's class is filed under them by the
+  /// server whatever this sheet sends.
+  bool get _choosesTeacher => gIsPrincipal();
+
+  @override
+  void initState() {
+    super.initState();
+    if (_choosesTeacher) _loadTeachers();
+  }
+
+  /// Fetches the teacher list for the picker.
+  ///
+  /// A failure is swallowed into an empty list rather than blocking the sheet.
+  /// Creating an unassigned class and handing it over later is a complete
+  /// workflow, so a picker that could not load should cost the principal the
+  /// convenience, not the class.
+  Future<void> _loadTeachers() async {
+    try {
+      final List<GB_TeacherSummary> teachers =
+          await GB_TeacherApi.listTeachers(token: gRequireToken());
+      if (!mounted) return;
+      setState(() => _teachers = teachers);
+    } on GB_ApiException {
+      if (!mounted) return;
+      setState(() => _teachers = <GB_TeacherSummary>[]);
+    }
+  }
 
   @override
   void dispose() {
@@ -147,20 +194,23 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
       // A restore sends the file's students with the class, so the server
       // creates them together. They keep their original student ids, and the
       // restored class is indistinguishable from one that was never deleted.
-      final GB_ClassInfo created = await GB_ClassStore.addClass(
+      final GB_ActionResult result = await GB_ClassStore.addClass(
         name: name,
         colorSlot: _colorSlot,
+        teacherId: _choosesTeacher ? _teacherId : null,
         students: archive?.students ?? const [],
       );
 
       // The restored students exist on the server now but not in this
       // device's copy, and the dashboard's confirmation counts them from it.
-      if (archive != null && archive.students.isNotEmpty) {
+      // Only once something was really created: a teacher's restore is a
+      // request, and there is nothing yet to load.
+      if (result.isDone && archive != null && archive.students.isNotEmpty) {
         await GB_StudentStore.load();
       }
 
       if (!mounted) return;
-      Navigator.of(context).pop(created);
+      Navigator.of(context).pop(result);
     } on GB_ApiException catch (error) {
       if (!mounted) return;
       // Shown under the name field: the likeliest refusal is a duplicate name
@@ -213,9 +263,14 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
               ),
             ),
             const SizedBox(height: 6.0),
-            const Text(
-              "It will show up on your dashboard straight away.",
-              style: TextStyle(
+            Text(
+              // The two roles are told different truths because they are
+              // different truths. A teacher's class does not show up straight
+              // away and saying so would be the one lie this sheet could tell.
+              _choosesTeacher
+                  ? "It will show up on the school's dashboard straight away."
+                  : "The principal will be asked to approve it.",
+              style: const TextStyle(
                 fontSize: kEventSubtitleTextSize,
                 color: kHomeSubtitleTextColor,
               ),
@@ -248,6 +303,10 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
                 floatingLabelStyle: const TextStyle(color: kHomeAccentColor),
               ),
             ),
+            if (_choosesTeacher) ...[
+              const SizedBox(height: 16.0),
+              _buildTeacherPicker(),
+            ],
             const SizedBox(height: 20.0),
             GB_ClassColorPicker(
               selectedSlot: _colorSlot,
@@ -267,9 +326,14 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
                 verticalPadding: kElevatedButtonVerticalPadding,
                 elevatedButtonText: _isSaving
                     ? "Saving…"
-                    : archive == null
-                        ? "Add class"
-                        : "Restore class",
+                    : _choosesTeacher
+                        ? (archive == null ? "Add class" : "Restore class")
+                        // A teacher is not adding anything yet, and a button
+                        // that says they are is the button they will tap
+                        // twice.
+                        : (archive == null
+                            ? "Ask to add class"
+                            : "Ask to restore class"),
                 buttonColor: kHomeAccentColor,
                 elevatedButtonTextColor: kPrimaryColor2,
                 elevatedButtonFontWeight: FontWeight.w500,
@@ -280,6 +344,73 @@ class _GB_AddClassSheetState extends State<GB_AddClassSheet> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Who is to take the new class — the principal's field only.
+  ///
+  /// "Unassigned" is first and is the default, because a principal setting up
+  /// September often does not yet know. It is a real state on the server, not
+  /// a placeholder: the class exists, appears on the school's dashboard, and
+  /// holds its name against duplicates until somebody is given it.
+  Widget _buildTeacherPicker() {
+    final List<GB_TeacherSummary>? teachers = _teachers;
+
+    if (teachers == null) {
+      return const Row(
+        children: [
+          SizedBox(
+            width: kFieldLabelTextSize,
+            height: kFieldLabelTextSize,
+            child: CircularProgressIndicator(strokeWidth: 2.0),
+          ),
+          SizedBox(width: 10.0),
+          Text(
+            "Loading teachers…",
+            style: TextStyle(
+              fontSize: kFieldLabelTextSize,
+              color: kHomeSubtitleTextColor,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return DropdownButtonFormField<String?>(
+      value: _teacherId,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: "Class teacher",
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(kClassTileRadius),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(kClassTileRadius),
+          borderSide: const BorderSide(color: kHomeAccentColor),
+        ),
+        labelStyle: const TextStyle(color: kHomeSubtitleTextColor),
+        floatingLabelStyle: const TextStyle(color: kHomeAccentColor),
+        helperText: teachers.isEmpty
+            ? "No teachers have signed up yet"
+            : "You can assign or change this later",
+        helperStyle: const TextStyle(
+          fontSize: kFieldLabelTextSize,
+          color: kHomeSubtitleTextColor,
+        ),
+      ),
+      dropdownColor: kPrimaryColor2,
+      items: [
+        const DropdownMenuItem<String?>(
+          value: null,
+          child: Text("Unassigned — decide later"),
+        ),
+        for (final GB_TeacherSummary teacher in teachers)
+          DropdownMenuItem<String?>(
+            value: teacher.teacherId,
+            child: Text(teacher.fullName, overflow: TextOverflow.ellipsis),
+          ),
+      ],
+      onChanged: (String? value) => setState(() => _teacherId = value),
     );
   }
 

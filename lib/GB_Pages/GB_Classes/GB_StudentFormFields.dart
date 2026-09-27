@@ -3,6 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
+import 'package:intl_phone_field/countries.dart';
+import 'package:intl_phone_field/intl_phone_field.dart';
+import 'package:intl_phone_field/phone_number.dart';
 
 /// The pieces the register-student sheet is built from.
 ///
@@ -95,6 +98,117 @@ class GB_SheetTextField extends StatelessWidget {
         focusedBorder: _outline(kHomeAccentColor),
       ),
     );
+  }
+
+  OutlineInputBorder _outline(Color color) {
+    return OutlineInputBorder(
+      borderRadius: BorderRadius.circular(kFieldRadius),
+      borderSide: BorderSide(color: color),
+    );
+  }
+}
+
+/// A mobile number with a country-code picker — India unless the teacher picks
+/// another country, or the number being edited already carries one.
+///
+/// [controller] holds the complete number the server stores, "+919876543210",
+/// or "" when the field is empty. It is not attached to the text box, which
+/// shows the national part only; it is kept in step on every change, so the
+/// form reads it like any other field's controller.
+///
+/// Optional: an empty field passes, a filled one must suit the chosen
+/// country's length.
+class GB_SheetPhoneField extends StatefulWidget {
+  const GB_SheetPhoneField({
+    super.key,
+    required this.controller,
+    required this.label,
+  });
+
+  final TextEditingController controller;
+  final String label;
+
+  @override
+  State<GB_SheetPhoneField> createState() => _GB_SheetPhoneFieldState();
+}
+
+class _GB_SheetPhoneFieldState extends State<GB_SheetPhoneField> {
+  /// The digits typed after the country code, so a change of country can
+  /// rebuild the complete number — the field reports only the country then.
+  String _national = "";
+
+  void _store(String countryCode) {
+    widget.controller.text = _national.isEmpty ? "" : "$countryCode$_national";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final String initial = widget.controller.text;
+    final bool hasCode = initial.startsWith("+");
+
+    return IntlPhoneField(
+      // Given a "+..." number and no country, the field works out the country
+      // from the number; forcing India would mislabel a foreign one.
+      initialValue: hasCode ? initial : null,
+      initialCountryCode: hasCode ? null : "IN",
+      style: const TextStyle(
+        fontSize: kFieldInputTextSize,
+        letterSpacing: 0.5,
+        color: kHomeTitleTextColor,
+      ),
+      dropdownTextStyle: const TextStyle(
+        fontSize: kFieldInputTextSize,
+        color: kHomeTitleTextColor,
+      ),
+      decoration: InputDecoration(
+        labelText: widget.label,
+        // The package draws a "0/10" length counter under the field; the
+        // other fields have none.
+        counterText: "",
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16.0,
+          vertical: 16.0,
+        ),
+        labelStyle: const TextStyle(
+          fontSize: kFieldInputTextSize,
+          color: kHomeSubtitleTextColor,
+        ),
+        floatingLabelStyle: const TextStyle(
+          fontSize: kFieldInputTextSize,
+          letterSpacing: 0.4,
+          color: kHomeTitleTextColor,
+        ),
+        border: _outline(kFieldBorderColor),
+        enabledBorder: _outline(kFieldBorderColor),
+        focusedBorder: _outline(kHomeAccentColor),
+      ),
+      invalidNumberMessage: "Enter a valid mobile number",
+      onChanged: (PhoneNumber value) {
+        _national = value.number;
+        _store(value.countryCode);
+      },
+      onCountryChanged: (Country country) {
+        _store("+${country.fullCountryCode}");
+      },
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Seeded the way the field itself parses its initial value, so changing
+    // only the country of an existing number keeps its digits.
+    final String initial = widget.controller.text;
+    if (!initial.startsWith("+")) return;
+    final String digits = initial.substring(1);
+    final Country country = countries.firstWhere(
+      (Country item) => digits.startsWith(item.fullCountryCode),
+      orElse: () => countries.first,
+    );
+    _national = digits.startsWith(country.fullCountryCode)
+        ? digits.substring(country.fullCountryCode.length)
+        : digits;
   }
 
   OutlineInputBorder _outline(Color color) {

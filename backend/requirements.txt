@@ -1,6 +1,12 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 sqlalchemy==2.0.36
+
+# Owns the database schema as of 2026-09-17. A runtime dependency, not a dev
+# one: app/main.py refuses to start against a database whose schema is behind
+# the code, and the test suite builds its own database by running the real
+# migrations.
+alembic==1.14.0
 pydantic==2.10.4
 pydantic-settings==2.7.0
 email-validator==2.2.0

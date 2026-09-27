@@ -328,18 +328,17 @@ class _GB_CompleteProfileState extends State<GB_CompleteProfile> {
                       style: kH2TextStyle,
                     ),
                   ),
+                  // From kAccountTypeOptions, so this row and the sign-up
+                  // dropdown can never disagree about which roles exist.
                   Row(
                     children: [
-                      _accountTypeOption(
-                        label: "Teacher",
-                        icon: Icons.school_outlined,
-                        value: accountTypeTeacher,
-                      ),
-                      _accountTypeOption(
-                        label: "Student",
-                        icon: Icons.backpack_outlined,
-                        value: accountTypeStudent,
-                      ),
+                      for (final GB_AccountTypeOption option
+                          in kAccountTypeOptions)
+                        _accountTypeOption(
+                          label: option.label,
+                          icon: option.icon,
+                          value: option.value,
+                        ),
                     ],
                   ),
                 ],

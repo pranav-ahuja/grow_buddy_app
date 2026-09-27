@@ -15,5 +15,13 @@
         <domain includeSubdomains="false">10.0.2.2</domain>
         <!-- Development machine on the LAN, matches kApiBaseUrl -->
         <domain includeSubdomains="false">192.168.0.157</domain>
+        <!--
+          Reaching the backend over Tailscale needs nothing here. `tailscale
+          serve` fronts uvicorn with a real Let's Encrypt certificate, so the
+          app talks https:// to <machine>.<tailnet>.ts.net and never trips the
+          cleartext rule. That is also why the Tailscale path is the only one
+          that works in a release build: this file is src/debug only.
+          See tool/gb_tailscale_serve.ps1.
+        -->
     </domain-config>
 </network-security-config>

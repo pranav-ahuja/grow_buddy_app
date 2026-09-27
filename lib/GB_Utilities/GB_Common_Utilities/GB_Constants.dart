@@ -109,12 +109,21 @@ const double kFeatureRowGap = 24.0;
 
 const double kStudentCardWidth = 92.0;
 const double kStudentCardHeight = 120.0;
-const double kStudentAvatarRadius = 30.0;
+const double kStudentAvatarRadius = 28.0;
 const double kStudentNameTextSize = 16.0;
 /// The caption under a name on a student card. The design drew an age there;
 /// the card shows the student id instead, at the same size.
 const double kStudentIdTextSize = 12.0;
 const double kStudentRowGap = 16.0;
+
+/// Between the photo and the name on a student card.
+const double kStudentCardGap = 4.0;
+/// The card is a fixed height with three lines under the photo, so their
+/// line height is pinned instead of left to the font, and the text stops
+/// growing a little above the default size. Together these keep the card
+/// from overflowing on a phone set to a larger font.
+const double kStudentCardLineHeight = 1.2;
+const double kStudentCardMaxTextScale = 1.1;
 
 /// The faint top-to-bottom wash behind the horizontal card rows.
 const Color kClassRowWashColor = Color(0xffF1F1F1);
@@ -182,6 +191,12 @@ const TextStyle kH2TextStyle = TextStyle(
 //OTP Constants
 const double kOtpDigitTextSize = 26.0;
 
+// How long GB_Verify keeps 'Resend Code' disabled. Mirrors the backend's
+// OTP_RESEND_COOLDOWN_SECONDS in app/routers/auth.py -- if they disagree the
+// button goes live before the server will accept a resend, and the user gets
+// a rejection they did nothing to earn.
+const int kOtpResendCooldownSeconds = 30;
+
 //Elevated button Constants
 const double kElevatedButtonVerticalPadding = 10.0;
 const double kElevatedButtonTextSize = 18.0;
@@ -189,8 +204,63 @@ const double kElevatedButtonIconSize = 30.0;
 const double kEvelatedButtonPadding = 8.0;
 
 //Account Type
+// These integers are the API's `account_type`, and they are mirrored in the
+// backend's app/models.py. The backend maps them to the role text it stores
+// ('teacher' / 'student' / 'principal'); the numbers themselves are written
+// into every existing row, so they are append-only — never renumber them.
 const int accountTypeTeacher = 0;
 const int accountTypeStudent = 1;
+
+/// The principal, who is the school's admin.
+const int accountTypePrincipal = 2;
+
+/// One choosable account type: the number the API wants, the word the user
+/// reads, and the icon beside it.
+class GB_AccountTypeOption {
+  const GB_AccountTypeOption({
+    required this.value,
+    required this.label,
+    required this.icon,
+  });
+
+  final int value;
+  final String label;
+  final IconData icon;
+}
+
+/// Every account type a person can pick, in the order they are offered.
+///
+/// One list rather than the same three choices restated in each picker. Before
+/// this, the roles were written out separately in `GB_SignUp`, in
+/// `DropDownTextFieldMenu`, and in `GB_CompleteProfile` — so adding the
+/// principal meant three edits that could each be forgotten, and a role
+/// missing from one screen is invisible until someone tries to sign up on it.
+const List<GB_AccountTypeOption> kAccountTypeOptions = [
+  GB_AccountTypeOption(
+    value: accountTypeTeacher,
+    label: "Teacher",
+    icon: Icons.school_outlined,
+  ),
+  GB_AccountTypeOption(
+    value: accountTypeStudent,
+    label: "Student",
+    icon: Icons.backpack_outlined,
+  ),
+  GB_AccountTypeOption(
+    value: accountTypePrincipal,
+    label: "Principal",
+    icon: Icons.admin_panel_settings_outlined,
+  ),
+];
+
+/// The label for an account type, for anywhere one has to be shown back to the
+/// user. Null when the role was never chosen.
+String? gAccountTypeLabel(int? value) {
+  for (final GB_AccountTypeOption option in kAccountTypeOptions) {
+    if (option.value == value) return option.label;
+  }
+  return null;
+}
 
 //Google Sign-In
 // Both come from Google Cloud Console -> APIs & Services -> Credentials, and
@@ -211,7 +281,25 @@ const String kGoogleIosClientId = "";
 //   Android emulator      -> http://10.0.2.2:8080
 //   iOS simulator/desktop -> http://127.0.0.1:8080
 //   Physical device       -> http://<your-computer-LAN-IP>:8080
-const String kApiBaseUrl = 'http://192.168.0.157:8080';
+//   Anywhere, any network -> https://<machine>.<tailnet>.ts.net   (Tailscale)
+//
+// The default below is this machine's LAN address, which only reaches the
+// backend while the phone is on the same Wi-Fi. Rather than editing this line
+// for every network, override it at build time:
+//
+//   flutter run --dart-define=GB_API_BASE_URL=https://<machine>.<tailnet>.ts.net
+//
+// `tool/gb_tailscale_serve.ps1` starts the Tailscale proxy and prints that
+// command with the real hostname filled in. The Tailscale form carries no port
+// (serve listens on 443) and needs no network_security_config entry, because it
+// is real HTTPS with a Let's Encrypt certificate rather than cleartext.
+//
+// `String.fromEnvironment` is a const constructor, so everything below stays a
+// compile-time constant either way.
+const String kApiBaseUrl = String.fromEnvironment(
+  'GB_API_BASE_URL',
+  defaultValue: 'http://192.168.0.157:8080',
+);
 const String kApiPrefix = '$kApiBaseUrl/api/v1';
 
 const String kSignUpUrl = '$kApiPrefix/auth/signup';
@@ -222,8 +310,37 @@ const String kGoogleLoginUrl = '$kApiPrefix/auth/google';
 // GET returns the current user; PATCH completes their profile.
 const String kMeUrl = '$kApiPrefix/auth/me';
 
+// Changing a contact you already have, which takes a code to the new address
+// or number first. Separate from PATCH /auth/me on purpose: that route fills in
+// a *missing* email or phone, while these two prove a replacement before it
+// becomes the thing you log in with.
+const String kContactChangeRequestUrl = '$kMeUrl/contact/request';
+const String kContactChangeVerifyUrl = '$kMeUrl/contact/verify';
+
+// What the two contact channels are called on the wire. Sent as a string the
+// server CHECKs, so a typo here is a 422 and not a silently wrong column.
+const String kContactChannelPhone = 'phone';
+const String kContactChannelEmail = 'email';
+
 // A teacher's classes and students. Everything under these is scoped to the
 // signed-in user by the bearer token, which is what makes the same account show
 // the same classes on every device.
 const String kClassesUrl = '$kApiPrefix/classes';
 const String kStudentsUrl = '$kApiPrefix/students';
+
+// Both are role-scoped on the server: /students answers a teacher with their
+// own pupils, the principal with the whole school, and a parent with their own
+// children. The app sends no filter of its own, so it cannot get that filter
+// wrong — which matters, because what is being filtered is other people's
+// children.
+const String kAttendanceUrl = '$kApiPrefix/attendance';
+const String kSubjectsUrl = '$kApiPrefix/subjects';
+const String kTeachersUrl = '$kApiPrefix/teachers';
+
+/// The approval queue. A teacher's create/delete of a class, and their adding
+/// or removing a pupil, land here as requests for the principal to answer;
+/// see the backend's app/approvals.py.
+const String kRequestsUrl = '$kApiPrefix/requests';
+
+/// The notification tab — each account's own notices plus every broadcast.
+const String kNotificationsUrl = '$kApiPrefix/notifications';

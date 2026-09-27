@@ -27,13 +27,13 @@ class GB_StudentStore {
   /// Registers a student on the server and returns them as stored, carrying
   /// the id and roll number the server assigned.
   ///
-  /// Reloads afterwards rather than appending the one student: roll numbers
-  /// are alphabetical, so a new "Bela" moves every classmate after her down
-  /// one, and only the server's list has all of those right.
+  /// Reloads afterwards rather than appending the one student, so the list
+  /// is exactly the server's — roll numbers included, which the server works
+  /// out.
   ///
   /// Throws [GB_ApiException] if the server refuses — including a 409 when the
   /// same child is already in the class — leaving the local copy untouched.
-  static Future<GB_Student> addStudent({
+  static Future<GB_ActionResult> addStudent({
     required String name,
     required DateTime dateOfBirth,
     required String gender,
@@ -44,7 +44,7 @@ class GB_StudentStore {
     GB_StudentContact? father,
     GB_StudentContact? guardian,
   }) async {
-    final GB_Student created = await GB_ClassApi.createStudent(
+    final GB_ActionResult result = await GB_ClassApi.createStudent(
       token: gRequireToken(),
       student: GB_Student(
         name: name.trim(),
@@ -60,6 +60,13 @@ class GB_StudentStore {
       ),
     );
 
+    // Registration goes straight in for a teacher as well as the principal
+    // (since 2026-09-27), so a pupil is expected back. The null check is for
+    // a server from before then, whose teacher registrations were requests
+    // that put nobody on a register yet.
+    final GB_Student? created = result.student;
+    if (created == null) return result;
+
     try {
       await load();
     } on Exception {
@@ -68,7 +75,60 @@ class GB_StudentStore {
       // catch up on the next load.
       students.value = [...students.value, created];
     }
-    return created;
+    return result;
+  }
+
+  /// Saves a pupil's edited details on the server.
+  ///
+  /// Reloads afterwards, so this device shows the record as the server
+  /// stored it (numbers normalised, for one).
+  static Future<GB_ActionResult> updateStudent(GB_Student student) async {
+    final GB_ActionResult result = await GB_ClassApi.updateStudent(
+      token: gRequireToken(),
+      student: student,
+    );
+
+    final GB_Student? updated = result.student;
+    if (updated == null) return result;
+
+    try {
+      await load();
+    } on Exception {
+      // Saved on the server; only the refresh failed. Swap the one row so this
+      // device shows the edit — roll numbers catch up on the next load.
+      students.value = [
+        for (final GB_Student item in students.value)
+          item.studentId == updated.studentId ? updated : item,
+      ];
+    }
+    return result;
+  }
+
+  /// Removes a pupil on the server, or asks the principal to.
+  ///
+  /// Reloads on success rather than dropping the one row, for the same reason
+  /// [addStudent] does: a pupil leaving moves every classmate registered after
+  /// them up one, and only the server's list has
+  /// all of those right.
+  static Future<GB_ActionResult> removeStudent(String studentId) async {
+    final GB_ActionResult result = await GB_ClassApi.deleteStudent(
+      token: gRequireToken(),
+      studentId: studentId,
+    );
+
+    if (!result.isDone) return result;
+
+    try {
+      await load();
+    } on Exception {
+      // The pupil is gone on the server; only the refresh failed. Dropping
+      // them locally keeps this device honest — the classmates' roll numbers
+      // catch up on the next load.
+      students.value = students.value
+          .where((GB_Student student) => student.studentId != studentId)
+          .toList();
+    }
+    return result;
   }
 
   /// The students in one class, in roll-number order.

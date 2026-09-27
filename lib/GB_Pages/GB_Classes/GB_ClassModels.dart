@@ -27,6 +27,27 @@ class GB_ClassInfo {
   final Color fillColor;
   final Color borderColor;
 
+  /// The `TR_` id of the class teacher — the one teacher answerable for this
+  /// class.
+  ///
+  /// **Null means unassigned**, which is a class the principal has created and
+  /// not yet given to anyone, not a class in a broken state.
+  final String? teacherId;
+
+  /// The name of the class teacher.
+  ///
+  /// For the principal's dashboard, which lists every class in the school:
+  /// two teachers each having a "Nursery" is normal and allowed, so without
+  /// the owner's name that list is two identical tiles. Null when the class is
+  /// unassigned, or when the server did not send one.
+  final String? teacherName;
+
+  /// Everyone who teaches this class, the class teacher first.
+  ///
+  /// A class may have several teachers — the principal picks them from the
+  /// class screen, several at a time. Empty means nobody teaches it yet.
+  final List<GB_ClassTeacher> teachers;
+
   const GB_ClassInfo({
     required this.id,
     required this.name,
@@ -34,7 +55,32 @@ class GB_ClassInfo {
     required this.imagePath,
     required this.fillColor,
     required this.borderColor,
+    this.teacherId,
+    this.teacherName,
+    this.teachers = const <GB_ClassTeacher>[],
   });
+
+  /// The ids of everyone teaching this class — what the "Add teacher" picker
+  /// opens with already highlighted.
+  List<String> get teacherIds =>
+      teachers.map((GB_ClassTeacher t) => t.teacherId).toList();
+}
+
+/// One teacher on a class, as the class screen and its picker read them.
+class GB_ClassTeacher {
+  const GB_ClassTeacher({
+    required this.teacherId,
+    required this.fullName,
+    this.isClassTeacher = false,
+  });
+
+  final String teacherId;
+  final String fullName;
+
+  /// True for the class teacher. The picker highlights everyone alike, but the
+  /// class screen names the class teacher first and the rest after — a room
+  /// with two adults still has one who is answerable for it.
+  final bool isClassTeacher;
 }
 
 /// One choosable class colour: the tile fill, its border, and the opaque
@@ -268,10 +314,10 @@ class GB_Student {
   /// created the class they are going back into.
   final String? classId;
 
-  /// The student's position in their class, alphabetically — 1 for the first
-  /// name. Worked out by the server on every read, so it shifts when a student
-  /// with an earlier name joins or one before them leaves. Null before the
-  /// server has seen the student.
+  /// The student's position in their class by registration order — 1 for the
+  /// first registered. Worked out by the server on every read: a new student
+  /// gets the next number, and it shifts only when one before them leaves.
+  /// Null before the server has seen the student.
   final int? rollNumber;
 
   /// A photo the teacher picked, as a file path on the device. Null when they

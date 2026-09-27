@@ -1,23 +1,61 @@
 import re
 import uuid as uuid_lib
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.models import ACCOUNT_TYPE_STUDENT, ACCOUNT_TYPE_TEACHER
+from app.models import (
+    ACCOUNT_TYPE_PRINCIPAL,
+    ACCOUNT_TYPE_STUDENT,
+    ACCOUNT_TYPE_TEACHER,
+    ATTENDANCE_ABSENT,
+    ATTENDANCE_PRESENT,
+    CONTACT_CHANNEL_EMAIL,
+    CONTACT_CHANNEL_PHONE,
+    CONTACT_CHANNELS,
+)
 from app.security import MAX_PASSWORD_BYTES
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE_CLEANUP_RE = re.compile(r"[\s\-()]")
 _PHONE_RE = re.compile(r"^\+?\d{7,15}$")
 
+# Every account_type the API accepts. One tuple rather than the same three-way
+# comparison written out at each validator, so adding a fourth role later is a
+# single edit and cannot be half-applied.
+KNOWN_ACCOUNT_TYPES = (
+    ACCOUNT_TYPE_TEACHER,
+    ACCOUNT_TYPE_STUDENT,
+    ACCOUNT_TYPE_PRINCIPAL,
+)
+
+
+# The school is in India: a number typed without a country code is Indian.
+DEFAULT_COUNTRY_CODE = "91"
+
 
 def normalize_phone(raw: str) -> str:
-    """Strip formatting so the same number always hits the same DB row.
+    """One spelling per number, so the same number always hits the same row.
 
-    '+91 98765-43210' and '+919876543210' must not create two accounts.
+    '+91 98765-43210', '9876543210', '09876543210' and '919876543210' are all
+    '+919876543210'. That matters twice over: two spellings must not create two
+    accounts, and a parent's login (always +91..., from the phone field) must
+    equal the number the teacher typed on the register form, or the parent is
+    never mapped to their child.
     """
-    return _PHONE_CLEANUP_RE.sub("", raw.strip())
+    phone = _PHONE_CLEANUP_RE.sub("", raw.strip())
+    if phone.startswith("00"):
+        phone = "+" + phone[2:]
+    if not phone or phone.startswith("+") or not phone.isdigit():
+        return phone
+
+    if len(phone) == 10:
+        return f"+{DEFAULT_COUNTRY_CODE}{phone}"
+    if len(phone) == 11 and phone.startswith("0"):
+        return f"+{DEFAULT_COUNTRY_CODE}{phone[1:]}"
+    if len(phone) == 12 and phone.startswith(DEFAULT_COUNTRY_CODE):
+        return f"+{phone}"
+    return phone
 
 
 def looks_like_email(value: str) -> bool:
@@ -52,6 +90,7 @@ class UserOut(BaseModel):
     needs_contact_details: bool
 
     is_phone_verified: bool
+    is_email_verified: bool
     created_at: datetime
 
 
@@ -120,8 +159,10 @@ class ProfileUpdateRequest(BaseModel):
     def _known_account_type(cls, value: int | None) -> int | None:
         if value is None:
             return None
-        if value not in (ACCOUNT_TYPE_TEACHER, ACCOUNT_TYPE_STUDENT):
-            raise ValueError("account_type must be 0 (teacher) or 1 (student)")
+        if value not in KNOWN_ACCOUNT_TYPES:
+            raise ValueError(
+                "account_type must be 0 (teacher), 1 (student) or 2 (principal)"
+            )
         return value
 
     @model_validator(mode="after")
@@ -159,8 +200,10 @@ class SignUpRequest(BaseModel):
     @field_validator("account_type")
     @classmethod
     def _known_account_type(cls, value: int) -> int:
-        if value not in (ACCOUNT_TYPE_TEACHER, ACCOUNT_TYPE_STUDENT):
-            raise ValueError("account_type must be 0 (teacher) or 1 (student)")
+        if value not in KNOWN_ACCOUNT_TYPES:
+            raise ValueError(
+                "account_type must be 0 (teacher), 1 (student) or 2 (principal)"
+            )
         return value
 
 
@@ -291,6 +334,15 @@ class StudentCreateRequest(StudentDetails):
     class_id: str = Field(min_length=1, max_length=16)
 
 
+class StudentUpdateRequest(StudentDetails):
+    """A pupil's details, edited. Every field, as on registration.
+
+    No class_id: this edits the record, it does not move the pupil. A
+    class_id in the body is ignored rather than refused, so the app can send
+    the same shape it registers with.
+    """
+
+
 class ArchivedStudent(StudentDetails):
     """A student read out of a class file, on its way back in with a restore.
 
@@ -308,8 +360,9 @@ class StudentOut(StudentDetails):
     student_id: str
     class_id: str
 
-    # Alphabetical position in the class, from the class_roster view. It moves
-    # when a student with an earlier name joins or one before them leaves.
+    # Position in the class by registration order, from the class_roster view.
+    # A new pupil gets the next number; it moves only when one before them
+    # leaves.
     roll_number: int
     created_at: datetime
 
@@ -342,10 +395,49 @@ class ClassOut(BaseModel):
     color_slot: int
     created_at: datetime
 
+    # The class teacher — the one owner. **Null means unassigned**, which is a
+    # class the principal has created and not yet handed to anyone, not a
+    # broken row. The principal's dashboard lists every class in the school,
+    # where two teachers each having a "Nursery" is normal, so without an
+    # owner's name that list would be actively misleading.
+    teacher_id: str | None = None
+
+    # Joined in by the list endpoint only. Optional, so the routes that return
+    # the ORM object straight back (create, update) still validate: there is no
+    # such attribute on SchoolClass, and the default fills in.
+    teacher_name: str | None = None
+
+    # Everyone who teaches this class, the class teacher first. Filled by the
+    # endpoints the class screen uses; empty elsewhere rather than absent, so
+    # the app never has to distinguish "no co-teachers" from "not asked".
+    teachers: list["ClassTeacherOut"] = Field(default_factory=list)
+
+
+class ClassTeacherOut(BaseModel):
+    """One teacher on a class, as the class screen and its picker read them."""
+
+    teacher_id: str
+    full_name: str
+
+    # True for the one in `classes.teacher_id`. The picker highlights all of
+    # them alike, but the class screen names the class teacher first and the
+    # rest after — a room with two adults still has one who is answerable for
+    # it.
+    is_class_teacher: bool = False
+
 
 class ClassCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     color_slot: int = 0
+
+    # The class teacher, **principal only**. Omitted or null creates an
+    # unassigned class, which is the point of the field: an admin setting up
+    # September does not yet know who is taking what.
+    #
+    # A teacher's own request ignores this — their class is theirs, and a
+    # field that let them file one under a colleague would be a way to put
+    # work on somebody else's dashboard.
+    teacher_id: str | None = Field(default=None, max_length=16)
 
     # Empty for an ordinary new class. Filled only by "Restore class", with the
     # students read out of the uploaded class file, so the server can create
@@ -396,3 +488,592 @@ class RosterEntry(BaseModel):
     roll_number: int
     student_name: str
     student_id: str
+
+
+# --- Subjects ----------------------------------------------------------------
+
+
+class SubjectCreateRequest(BaseModel):
+    """Adding a subject, or proposing one.
+
+    The same body either way — who is asking decides whether the result is
+    approved or pending, not anything in the request. A teacher cannot ask for
+    their proposal to arrive pre-approved because there is no field to ask with.
+    """
+
+    name: str = Field(min_length=1, max_length=80)
+
+    @field_validator("name")
+    @classmethod
+    def _clean(cls, value: str) -> str:
+        cleaned = _clean_text(value)
+        if not cleaned:
+            raise ValueError("Subject name cannot be blank")
+        return cleaned
+
+
+class SubjectOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    subject_id: str
+    name: str
+
+    # 'approved' or 'pending'. A pending subject is a teacher's proposal that
+    # the principal has not acted on; nothing should be taught against it yet.
+    status: str
+
+    proposed_by_teacher_id: str | None
+    approved_by_user_id: str | None
+    approved_at: datetime | None
+    created_at: datetime
+
+    # Joined in by the list endpoint, so a principal reviewing proposals can
+    # see who made them without a second request per row.
+    proposed_by_name: str | None = None
+
+
+# --- Attendance --------------------------------------------------------------
+
+
+class AttendanceEntry(BaseModel):
+    """One pupil's mark, inside a whole register."""
+
+    student_id: str = Field(min_length=1, max_length=16)
+    status: str = Field(min_length=1, max_length=1)
+
+    @field_validator("status")
+    @classmethod
+    def _known_status(cls, value: str) -> str:
+        mark = value.strip().upper()
+        if mark not in (ATTENDANCE_PRESENT, ATTENDANCE_ABSENT):
+            raise ValueError("status must be 'P' (present) or 'A' (absent)")
+        return mark
+
+
+class AttendanceMarkRequest(BaseModel):
+    """A whole register: one class, one day, a mark per pupil.
+
+    The register is taken in one request rather than one per child. A class of
+    thirty would otherwise be thirty round trips, any of which could fail and
+    leave the day half-marked — and a half-marked day reads as "the rest were
+    absent", which is a different and much worse claim than "not taken yet".
+    """
+
+    class_id: str = Field(min_length=1, max_length=16)
+    date: date
+    entries: list[AttendanceEntry] = Field(min_length=1)
+
+    @field_validator("date")
+    @classmethod
+    def _not_in_the_future(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("Attendance cannot be taken for a future date")
+        return value
+
+    @model_validator(mode="after")
+    def _one_mark_per_pupil(self) -> "AttendanceMarkRequest":
+        seen = [entry.student_id for entry in self.entries]
+        if len(set(seen)) != len(seen):
+            raise ValueError("The same student appears twice in this register")
+        return self
+
+
+class AttendanceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    student_id: str
+    class_id: str
+    teacher_id: str | None
+    date: date
+    status: str
+
+    # Joined in so a register reads as names rather than ids.
+    student_name: str | None = None
+
+
+# --- Teacher profile ---------------------------------------------------------
+
+_DIGITS_ONLY_RE = re.compile(r"\D")
+
+# Long enough that nobody's real date of birth is refused, short enough that a
+# typo like 1092 is.
+MAX_TEACHER_AGE_YEARS = 100
+
+
+def _clean_aadhaar(value: str) -> str:
+    """Twelve digits, with whatever spacing the form allowed stripped off.
+
+    People write Aadhaar as "1234 5678 9012". Stored bare, so the unique index
+    treats the spaced and unspaced forms as the same number — otherwise one
+    person could hold two teacher rows by typing it differently.
+    """
+    digits = _DIGITS_ONLY_RE.sub("", value)
+    if len(digits) != 12:
+        raise ValueError("An Aadhaar number is 12 digits")
+    return digits
+
+
+class TeacherExperienceCreateRequest(BaseModel):
+    """One previous post."""
+
+    school_name: str = Field(min_length=1, max_length=160)
+    school_address: str = Field(default="", max_length=500)
+    years: float = Field(ge=0, le=60)
+
+    @field_validator("school_name", "school_address")
+    @classmethod
+    def _clean(cls, value: str) -> str:
+        return _clean_text(value)
+
+    @field_validator("school_name")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value:
+            raise ValueError("School name cannot be blank")
+        return value
+
+
+class TeacherExperienceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    school_name: str
+    school_address: str
+    years: float
+
+
+class TeacherSubjectOut(BaseModel):
+    """A subject on a teacher's record — just enough to name it."""
+
+    subject_id: str
+    name: str
+
+
+class TeacherClassOut(BaseModel):
+    """A class on a teacher's record."""
+
+    class_id: str
+    name: str
+
+
+class TeacherOut(BaseModel):
+    """A teacher's whole record, as the profile screen shows it.
+
+    `full_name`, `email` and `phone` are joined from `users` rather than stored
+    here — see the note on the Teacher model. So this object is assembled by
+    the router, not validated straight off one row.
+    """
+
+    teacher_id: str
+    user_id: str
+
+    full_name: str
+    email: str | None
+    phone: str | None
+
+    date_of_birth: date | None
+    highest_qualification: str | None
+    address: str | None
+    relationship_status: str | None
+
+    # The last four digits, and never more. The full number does not leave the
+    # server: nothing in the app needs it, and a response carrying complete
+    # Aadhaar numbers is a liability in every log and cache it passes through.
+    aadhaar_last4: str | None
+
+    emergency_contact_name: str | None
+    emergency_contact_phone: str | None
+
+    classes: list[TeacherClassOut]
+    subjects: list[TeacherSubjectOut]
+    experience: list[TeacherExperienceOut]
+
+    # What the profile screen should still ask for. Aadhaar is excluded: it is
+    # the one field a teacher may reasonably refuse, and counting it would nag
+    # them forever over something optional.
+    missing_profile_fields: list[str]
+    is_profile_complete: bool
+
+    created_at: datetime
+
+
+class TeacherProfileUpdateRequest(BaseModel):
+    """What the sign-up step and the profile screen send.
+
+    Every field optional so either can send only what it collected, but a
+    request that changes nothing is rejected rather than silently doing so.
+
+    Absent and null mean different things: a field left out is untouched, and
+    an explicit null clears it. Without that distinction a teacher could never
+    remove an address they entered by mistake.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    date_of_birth: date | None = None
+    highest_qualification: str | None = Field(default=None, max_length=120)
+    address: str | None = Field(default=None, max_length=500)
+    relationship_status: str | None = Field(default=None, max_length=32)
+    aadhaar_number: str | None = Field(default=None, max_length=20)
+    emergency_contact_name: str | None = Field(default=None, max_length=120)
+    emergency_contact_phone: str | None = Field(default=None, max_length=32)
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def _plausible(cls, value: date | None) -> date | None:
+        if value is None:
+            return None
+        today = date.today()
+        if value > today:
+            raise ValueError("Date of birth cannot be in the future")
+        if value.year < today.year - MAX_TEACHER_AGE_YEARS:
+            raise ValueError("Please check the date of birth")
+        return value
+
+    @field_validator(
+        "highest_qualification",
+        "address",
+        "relationship_status",
+        "emergency_contact_name",
+    )
+    @classmethod
+    def _clean_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        # An empty string means "clear this", so it stays None rather than "".
+        return _clean_text(value) or None
+
+    @field_validator("aadhaar_number")
+    @classmethod
+    def _check_aadhaar(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        return _clean_aadhaar(value)
+
+    @field_validator("emergency_contact_phone")
+    @classmethod
+    def _check_emergency_phone(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        phone = normalize_phone(value)
+        if not is_valid_phone(phone):
+            raise ValueError("Enter a valid phone number, e.g. +919876543210")
+        return phone
+
+    @model_validator(mode="after")
+    def _requires_something(self) -> "TeacherProfileUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError(
+                "Provide at least one of: date_of_birth, "
+                "highest_qualification, address, relationship_status, "
+                "aadhaar_number, emergency_contact_name, "
+                "emergency_contact_phone"
+            )
+        return self
+
+
+class TeacherSubjectsAssignRequest(BaseModel):
+    """The principal setting which subjects a teacher teaches.
+
+    The **whole set**, not an add or a remove. A screen with checkboxes knows
+    what it wants the answer to be; asking it to work out the difference is how
+    a half-applied edit leaves a subject assigned that the principal just
+    unticked.
+    """
+
+    subject_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("subject_ids")
+    @classmethod
+    def _no_duplicates(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("The same subject is listed twice")
+        return value
+
+
+class ClassTeacherAssignRequest(BaseModel):
+    """The principal moving a class to a teacher."""
+
+    teacher_id: str = Field(min_length=1, max_length=16)
+
+
+# --- Guardians (parent accounts linked to a pupil) ---------------------------
+
+
+class GuardianLinkRequest(BaseModel):
+    """Staff linking a parent's account to a pupil.
+
+    The account is named by email or phone rather than by `U_` id, because
+    that is what a teacher has in front of them from the registration form.
+    """
+
+    identifier: str = Field(min_length=3, max_length=255)
+    relation: str = Field(default="", max_length=32)
+
+    @field_validator("relation")
+    @classmethod
+    def _clean_relation(cls, value: str) -> str:
+        return _clean_text(value)
+
+
+class GuardianOut(BaseModel):
+    user_id: str
+    student_id: str
+
+    full_name: str
+    email: str | None
+    phone: str | None
+    relation: str
+
+    # Whether this account's email or phone is one of the contacts on the
+    # pupil's own record. **Not** a permission check — the link is already
+    # authorised by the staff member who made it. It shows which links the
+    # registration form corroborates and which were typed in from elsewhere; a
+    # parent who changed their number since registering is an ordinary false
+    # negative, which is exactly why it cannot gate anything.
+    matches_registered_contact: bool
+
+    created_at: datetime
+
+
+# --- Teaching assignments -----------------------------------------------------
+
+
+class ClassTeachersAssignRequest(BaseModel):
+    """The principal setting who teaches a class, from the class screen's
+    "Add teacher" picker.
+
+    **The whole set, not a difference.** A screen of names where the chosen
+    ones are highlighted knows what it wants the answer to be; making it send
+    a diff is how an unhighlighted teacher stays assigned. An empty list is a
+    valid answer and means the class is unassigned — the same state a class is
+    created in.
+
+    The **first** id becomes the class teacher (`classes.teacher_id`) and the
+    rest become co-teachers, with one exception: a class that already has a
+    class teacher keeps them, as long as they are still in the set. Without
+    that exception, reordering a list of checkboxes would quietly reassign
+    who is answerable for the room.
+    """
+
+    teacher_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("teacher_ids")
+    @classmethod
+    def _no_duplicates(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("The same teacher is listed twice")
+        return value
+
+
+# --- Approval requests --------------------------------------------------------
+
+
+class ChangeRequestOut(BaseModel):
+    """One row of the approval queue, for either side of it.
+
+    The principal reads a list of these to decide from; the teacher reads
+    their own to see what became of what they asked for. One shape, because
+    they are looking at the same rows.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    kind: str
+    status: str
+
+    # Who asked. The name is the stored copy, so it still reads correctly
+    # after the teacher has left — see ChangeRequest.requested_by_name.
+    requested_by_teacher_id: str | None
+    requested_by_name: str
+
+    # What it is about, where that still exists. Either can be null: a
+    # class_create has no class until it is granted, and a granted
+    # class_delete has none afterwards.
+    class_id: str | None
+    student_id: str | None
+
+    # The one line to decide from: 'removal of the class "Nursery" and its 12
+    # students'. Written when the request was raised, so it describes what was
+    # asked even after the thing it names has gone.
+    summary: str
+
+    decided_by_user_id: str | None
+    decided_at: datetime | None
+    decision_note: str
+    created_at: datetime
+
+    # Deliberately **not** exposed: `payload`. It is the request's private
+    # copy of a register-student form — a child's address and both parents'
+    # numbers — and the queue only ever needs the summary to decide from.
+
+
+class RequestDecisionRequest(BaseModel):
+    """The principal's answer, when turning one down.
+
+    The note is optional but asked for in the UI, because "rejected" with no
+    reason is how a teacher asks again tomorrow in the same words.
+    """
+
+    note: str = Field(default="", max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def _clean_note(cls, value: str) -> str:
+        return _clean_text(value)
+
+
+class ActionResult(BaseModel):
+    """What came of a create or delete — done, or waiting on the principal.
+
+    One shape for all four acts, because who is asking decides which of the
+    two happens and the app should not need a different reader per role. The
+    principal gets `status: "done"` and the thing itself; a teacher gets
+    `status: "pending"` and the request that is now waiting.
+
+    `detail` is the sentence to show. It is written by the server for the same
+    reason every other message here is: the app would otherwise have to
+    reproduce the rule about who needs approval in order to word its own
+    snackbar, and be wrong the moment the rule changes.
+    """
+
+    status: str
+    detail: str
+
+    school_class: ClassOut | None = None
+    student: StudentOut | None = None
+    request: ChangeRequestOut | None = None
+
+
+# --- Notifications ------------------------------------------------------------
+
+
+class NotificationOut(BaseModel):
+    """One line in the notification tab."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+    # Separate, as stored: the tab groups by day and stamps each line with a
+    # clock time. See the Notification model for why they are not one column.
+    date: date
+    time: time
+
+    # Where it came from, in words — a teacher's name, or "GrowBuddy".
+    source: str
+
+    # "user" or "broadcast". Sent so the app can mark a school-wide notice as
+    # such; a broadcast reads differently from something addressed to you.
+    audience: str
+
+    message: str
+
+    # Set where this line is an approval the reader can decide on the spot.
+    # Null for anything that is only news.
+    request_id: int | None
+
+    read_at: datetime | None
+    created_at: datetime
+
+
+class NotificationListOut(BaseModel):
+    """The tab's contents, plus the two numbers its badges need.
+
+    Counted on the server rather than by the app. The unread count has to
+    match what the list would show, and two independent counts of the same
+    thing eventually disagree — usually at the worst moment, when the badge
+    says 3 and the list is empty.
+    """
+
+    notifications: list[NotificationOut]
+
+    # The dot on the bell.
+    unread: int
+
+    # The principal's queue depth, and **zero for everyone else** — a teacher
+    # has no business knowing how many requests the school is sitting on.
+    pending_requests: int
+
+
+class ContactChangeRequest(BaseModel):
+    """"Send a code to this address or number, which I say is mine."
+
+    The channel is explicit rather than sniffed from the value. Deciding
+    "anything with an @ is an email" means a mistyped email is treated as a
+    phone number and rejected with a message about phone numbers — and, worse,
+    that the column a verified code writes to is chosen by a regex rather than
+    by what the caller asked for.
+    """
+
+    channel: str
+    value: str = Field(min_length=3, max_length=255)
+
+    @field_validator("channel")
+    @classmethod
+    def _known_channel(cls, value: str) -> str:
+        channel = value.strip().lower()
+        if channel not in CONTACT_CHANNELS:
+            raise ValueError("channel must be 'phone' or 'email'")
+        return channel
+
+    @model_validator(mode="after")
+    def _normalize_value(self) -> "ContactChangeRequest":
+        """Normalised here, so the value that is stored, the value a code is
+        sent to, and the value a later login is looked up by are one string.
+
+        Phone through normalize_phone and email lower-cased — exactly what
+        OtpRequest and ProfileUpdateRequest already do to the same two fields.
+        A second rule for the same column is how "+91 98765 43210" becomes an
+        account nobody can log into.
+        """
+        if self.channel == CONTACT_CHANNEL_PHONE:
+            phone = normalize_phone(self.value)
+            if not is_valid_phone(phone):
+                raise ValueError("Enter a valid phone number, e.g. +919876543210")
+            object.__setattr__(self, "value", phone)
+        else:
+            email = self.value.strip().lower()
+            if not looks_like_email(email):
+                raise ValueError("Enter a valid email address")
+            object.__setattr__(self, "value", email)
+        return self
+
+
+class ContactChangeVerifyRequest(BaseModel):
+    """The code, and which pending change it is for.
+
+    No value field: the value being confirmed is the one the code was issued
+    for, which is on the row. Taking it from the caller again would let a code
+    sent to one address be redeemed against another.
+    """
+
+    channel: str
+    otp: str = Field(min_length=4, max_length=8)
+
+    @field_validator("channel")
+    @classmethod
+    def _known_channel(cls, value: str) -> str:
+        channel = value.strip().lower()
+        if channel not in CONTACT_CHANNELS:
+            raise ValueError("channel must be 'phone' or 'email'")
+        return channel
+
+
+class ContactChangeResponse(BaseModel):
+    """What the app needs to draw the code step.
+
+    `value` is echoed so the screen can say "we sent a code to +9190…01"
+    against the number the server actually stored, not the one the field
+    happens to still hold.
+    """
+
+    message: str
+    channel: str
+    value: str
+    expires_in_seconds: int
+    # Populated only while OTP_DEBUG_RETURN is on, as on OtpRequestResponse —
+    # there is no SMS or email provider wired up yet, so without this the flow
+    # could not be exercised at all. Never set in production.
+    debug_otp: str | None = None

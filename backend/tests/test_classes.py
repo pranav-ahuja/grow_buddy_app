@@ -1,3 +1,4 @@
+import helpers
 from sqlalchemy import delete
 
 from app.database import get_db
@@ -43,6 +44,37 @@ def _teacher(client, phone: str) -> dict[str, str]:
     return headers
 
 
+def _token(headers: dict[str, str]) -> str:
+    return headers["Authorization"].removeprefix("Bearer ")
+
+
+def _class(client, headers: dict[str, str], name: str, **kwargs) -> dict:
+    """A class owned by the teacher behind [headers], as a dict.
+
+    Created by a principal through `helpers`, because a teacher's own POST
+    /classes became a request for approval on 2026-09-20. Most tests below
+    only ever needed the class to exist; the ones that are about *who may
+    create one* post for themselves and are marked as doing so.
+    """
+    class_id = helpers.make_class(client, _token(headers), name, **kwargs)
+    return {"class_id": class_id, "name": name}
+
+
+def _register(client, headers: dict[str, str], **student) -> dict:
+    """Registers a pupil into a class, as staff who may do it outright.
+
+    Same reason as [_class]: a teacher's registration is a request now, and a
+    test about roll numbers wants pupils rather than a queue.
+    """
+    response = client.post(
+        STUDENTS, json=_student(**student), headers=helpers.auth(
+            helpers.admin_token(client)
+        )
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["student"]
+
+
 def _student(name: str = "Aarav", **overrides) -> dict:
     return {
         "name": name,
@@ -78,12 +110,10 @@ def test_every_table_hands_out_readable_ids(client):
     assert signup["user"]["role"] == "teacher"
     assert len(signup["user"]["uuid"]) == 36
 
-    nursery = client.post(CLASSES, json={"name": "Nursery"}, headers=headers).json()
+    nursery = _class(client, headers, "Nursery")
     assert nursery["class_id"] == "CL_000001"
 
-    student = client.post(
-        STUDENTS, json=_student(class_id=nursery["class_id"]), headers=headers
-    ).json()
+    student = _register(client, headers, class_id=nursery["class_id"])
     assert student["student_id"] == "ST_000001"
 
     db = _db()
@@ -92,11 +122,33 @@ def test_every_table_hands_out_readable_ids(client):
     db.close()
 
 
-def test_only_teachers_have_classes(client):
+def test_a_student_account_sees_no_classes_until_it_is_linked(client):
+    """Changed in phase 6, deliberately.
+
+    This asserted 403 — a student account reached nothing at all. A student
+    account is a parent now, and `GET /classes` answers with the classes their
+    children are in. Until the school links the account to a child there are
+    none, so the answer is an empty list: the parent has done nothing wrong
+    and can do nothing about it themselves, which is not what 403 says.
+    """
     headers = _phone_login(client, "+919100000020")
     client.patch(PROFILE, json={"account_type": 1}, headers=headers)
 
     response = client.get(CLASSES, headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_a_student_account_still_cannot_create_a_class(client):
+    """Reading widened in phase 6; writing did not."""
+    headers = _phone_login(client, "+919100000021")
+    client.patch(PROFILE, json={"account_type": 1}, headers=headers)
+
+    response = client.post(
+        CLASSES, json={"name": "Nursery", "color_slot": 0}, headers=headers
+    )
+
     assert response.status_code == 403
 
 
@@ -107,8 +159,7 @@ def test_a_class_added_on_one_device_shows_on_another(client):
     phone = _teacher(client, "+919100000001")
     emulator = _phone_login(client, "+919100000001")
 
-    created = client.post(CLASSES, json={"name": "Nursery", "color_slot": 3}, headers=phone)
-    assert created.status_code == 201
+    _class(client, phone, "Nursery", color_slot=3)
 
     listed = client.get(CLASSES, headers=emulator).json()
     assert [(c["name"], c["color_slot"]) for c in listed] == [("Nursery", 3)]
@@ -123,7 +174,7 @@ def test_classes_are_private_to_their_teacher(client):
     teacher_a = _teacher(client, "+919100000003")
     teacher_b = _teacher(client, "+919100000004")
 
-    created = client.post(CLASSES, json={"name": "KG"}, headers=teacher_a).json()
+    created = _class(client, teacher_a, "KG")
 
     assert client.get(CLASSES, headers=teacher_b).json() == []
     # Someone else's class reads as missing, not forbidden.
@@ -137,13 +188,27 @@ def test_two_teachers_can_both_have_a_nursery(client):
     teacher_a = _teacher(client, "+919100000005")
     teacher_b = _teacher(client, "+919100000006")
 
-    assert client.post(CLASSES, json={"name": "Nursery"}, headers=teacher_a).status_code == 201
-    assert client.post(CLASSES, json={"name": "Nursery"}, headers=teacher_b).status_code == 201
+    _class(client, teacher_a, "Nursery")
+    _class(client, teacher_b, "Nursery")
+
+    # Each sees exactly one, and it is their own.
+    assert [c["name"] for c in client.get(CLASSES, headers=teacher_a).json()] == [
+        "Nursery"
+    ]
+    assert [c["name"] for c in client.get(CLASSES, headers=teacher_b).json()] == [
+        "Nursery"
+    ]
 
 
 def test_duplicate_class_names_are_refused_ignoring_case(client):
+    """Checked before the request is even raised.
+
+    The teacher posts for themselves here, on purpose: the point is that they
+    are told "that name is taken" straight away rather than being left waiting
+    on an approval that could never have succeeded.
+    """
     headers = _teacher(client, "+919100000007")
-    client.post(CLASSES, json={"name": "Nursery"}, headers=headers)
+    _class(client, headers, "Nursery")
 
     duplicate = client.post(CLASSES, json={"name": "  nursery "}, headers=headers)
     assert duplicate.status_code == 409
@@ -152,7 +217,7 @@ def test_duplicate_class_names_are_refused_ignoring_case(client):
 
 def test_edit_class_changes_name_and_colour_together(client):
     headers = _teacher(client, "+919100000008")
-    created = client.post(CLASSES, json={"name": "Daycare"}, headers=headers).json()
+    created = _class(client, headers, "Daycare")
 
     edited = client.patch(
         f"{CLASSES}/{created['class_id']}",
@@ -164,7 +229,7 @@ def test_edit_class_changes_name_and_colour_together(client):
 
 def test_edit_class_rejects_an_out_of_range_colour(client):
     headers = _teacher(client, "+919100000010")
-    created = client.post(CLASSES, json={"name": "KG"}, headers=headers).json()
+    created = _class(client, headers, "KG")
 
     response = client.patch(
         f"{CLASSES}/{created['class_id']}", json={"color_slot": 9}, headers=headers
@@ -173,14 +238,23 @@ def test_edit_class_rejects_an_out_of_range_colour(client):
 
 
 def test_deleting_a_class_deletes_its_students(client):
-    headers = _teacher(client, "+919100000014")
-    nursery = client.post(CLASSES, json={"name": "Nursery"}, headers=headers).json()
-    kg = client.post(CLASSES, json={"name": "KG"}, headers=headers).json()
-    client.post(STUDENTS, json=_student(class_id=nursery["class_id"]), headers=headers)
-    client.post(STUDENTS, json=_student("Diya", class_id=kg["class_id"]), headers=headers)
+    """Deleted by the principal, whose delete takes effect at once.
 
-    response = client.delete(f"{CLASSES}/{nursery['class_id']}", headers=headers)
-    assert response.status_code == 204
+    A teacher's delete raises a request instead and changes nothing until it
+    is granted — which is test_approvals.py's subject, not this one's.
+    """
+    headers = _teacher(client, "+919100000014")
+    nursery = _class(client, headers, "Nursery")
+    kg = _class(client, headers, "KG")
+    _register(client, headers, class_id=nursery["class_id"])
+    _register(client, headers, name="Diya", class_id=kg["class_id"])
+
+    response = client.delete(
+        f"{CLASSES}/{nursery['class_id']}",
+        headers=helpers.auth(helpers.admin_token(client)),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "done"
 
     remaining = client.get(STUDENTS, headers=headers).json()
     assert [s["name"] for s in remaining] == ["Diya"]
@@ -197,7 +271,7 @@ def test_a_student_needs_a_class(client):
 
 def test_a_student_needs_a_date_of_birth_in_the_past(client):
     headers = _teacher(client, "+919100000031")
-    nursery = client.post(CLASSES, json={"name": "Nursery"}, headers=headers).json()
+    nursery = _class(client, headers, "Nursery")
 
     missing = _student(class_id=nursery["class_id"])
     del missing["date_of_birth"]
@@ -210,23 +284,21 @@ def test_a_student_needs_a_date_of_birth_in_the_past(client):
 def test_students_get_sequential_ids_across_devices(client):
     phone = _teacher(client, "+919100000011")
     emulator = _phone_login(client, "+919100000011")
-    nursery = client.post(CLASSES, json={"name": "Nursery"}, headers=phone).json()
+    nursery = _class(client, phone, "Nursery")
 
-    first = client.post(STUDENTS, json=_student(class_id=nursery["class_id"]), headers=phone)
-    second = client.post(
-        STUDENTS, json=_student("Diya", class_id=nursery["class_id"]), headers=emulator
-    )
+    first = _register(client, phone, class_id=nursery["class_id"])
+    second = _register(client, emulator, name="Diya", class_id=nursery["class_id"])
 
     # Two devices each counting on their own would both have said ST_000001.
-    assert first.json()["student_id"] == "ST_000001"
-    assert second.json()["student_id"] == "ST_000002"
+    assert first["student_id"] == "ST_000001"
+    assert second["student_id"] == "ST_000002"
     assert len(client.get(STUDENTS, headers=phone).json()) == 2
 
 
 def test_a_student_cannot_be_filed_in_someone_elses_class(client):
     teacher_a = _teacher(client, "+919100000012")
     teacher_b = _teacher(client, "+919100000013")
-    theirs = client.post(CLASSES, json={"name": "KG"}, headers=teacher_a).json()
+    theirs = _class(client, teacher_a, "KG")
 
     response = client.post(
         STUDENTS, json=_student(class_id=theirs["class_id"]), headers=teacher_b
@@ -234,13 +306,16 @@ def test_a_student_cannot_be_filed_in_someone_elses_class(client):
     assert response.status_code == 404
 
 
-def test_roll_numbers_are_alphabetical_and_renumber(client):
+def test_roll_numbers_follow_registration_order(client):
+    """Rewritten 2026-09-27 (migration 0009). Roll numbers used to be
+    alphabetical, so a new pupil could take an existing classmate's number;
+    they are in registration order now, and a newcomer gets the next one."""
     headers = _teacher(client, "+919100000040")
-    nursery = client.post(CLASSES, json={"name": "Nursery"}, headers=headers).json()
+    nursery = _class(client, headers, "Nursery")
     class_id = nursery["class_id"]
 
     for name in ("Kabir", "aarav", "Diya"):
-        client.post(STUDENTS, json=_student(name, class_id=class_id), headers=headers)
+        _register(client, headers, name=name, class_id=class_id)
 
     def rolls():
         return {
@@ -248,55 +323,53 @@ def test_roll_numbers_are_alphabetical_and_renumber(client):
             for s in client.get(STUDENTS, headers=headers).json()
         }
 
-    # Alphabetical regardless of the order they were registered in, and
-    # regardless of case.
-    assert rolls() == {"aarav": 1, "Diya": 2, "Kabir": 3}
+    assert rolls() == {"Kabir": 1, "aarav": 2, "Diya": 3}
 
-    # A student joining earlier in the alphabet moves everyone after them.
-    client.post(STUDENTS, json=_student("Bela", class_id=class_id), headers=headers)
-    assert rolls() == {"aarav": 1, "Bela": 2, "Diya": 3, "Kabir": 4}
+    # A new pupil gets the next number, whatever their name; nobody else moves.
+    _register(client, headers, name="Bela", class_id=class_id)
+    assert rolls() == {"Kabir": 1, "aarav": 2, "Diya": 3, "Bela": 4}
 
-    # A student leaving closes the gap.
+    # A pupil leaving still closes the gap behind them.
     db = _db()
-    db.execute(delete(Student).where(Student.name == "Bela"))
+    db.execute(delete(Student).where(Student.name == "aarav"))
     db.commit()
     db.close()
-    assert rolls() == {"aarav": 1, "Diya": 2, "Kabir": 3}
+    assert rolls() == {"Kabir": 1, "Diya": 2, "Bela": 3}
 
 
 def test_roll_numbers_restart_in_each_class(client):
     headers = _teacher(client, "+919100000041")
-    nursery = client.post(CLASSES, json={"name": "Nursery"}, headers=headers).json()
-    kg = client.post(CLASSES, json={"name": "KG"}, headers=headers).json()
+    nursery = _class(client, headers, "Nursery")
+    kg = _class(client, headers, "KG")
 
-    client.post(STUDENTS, json=_student("Zoya", class_id=nursery["class_id"]), headers=headers)
-    client.post(STUDENTS, json=_student("Yash", class_id=kg["class_id"]), headers=headers)
+    _register(client, headers, name="Zoya", class_id=nursery["class_id"])
+    _register(client, headers, name="Yash", class_id=kg["class_id"])
 
     assert [s["roll_number"] for s in client.get(STUDENTS, headers=headers).json()] == [1, 1]
 
 
 def test_the_roster_is_the_class_as_a_table(client):
+    """Rewritten 2026-09-27: roll numbers are in registration order (0009),
+    so Kabir, registered first, is 1."""
     headers = _teacher(client, "+919100000042")
-    nursery = client.post(CLASSES, json={"name": "Nursery"}, headers=headers).json()
+    nursery = _class(client, headers, "Nursery")
     for name in ("Kabir", "Aarav"):
-        client.post(
-            STUDENTS, json=_student(name, class_id=nursery["class_id"]), headers=headers
-        )
+        _register(client, headers, name=name, class_id=nursery["class_id"])
 
     roster = client.get(f"{CLASSES}/{nursery['class_id']}/roster", headers=headers).json()
     assert [
         (r["class_id"], r["class_name"], r["roll_number"], r["student_name"])
         for r in roster
     ] == [
-        (nursery["class_id"], "Nursery", 1, "Aarav"),
-        (nursery["class_id"], "Nursery", 2, "Kabir"),
+        (nursery["class_id"], "Nursery", 1, "Kabir"),
+        (nursery["class_id"], "Nursery", 2, "Aarav"),
     ]
 
 
 def test_the_same_child_cannot_be_registered_twice(client):
     headers = _teacher(client, "+919100000050")
-    nursery = client.post(CLASSES, json={"name": "Nursery"}, headers=headers).json()
-    client.post(STUDENTS, json=_student(class_id=nursery["class_id"]), headers=headers)
+    nursery = _class(client, headers, "Nursery")
+    _register(client, headers, class_id=nursery["class_id"])
 
     # The same child, typed a little differently — spacing, case, and a
     # formatted mobile number are not what makes two children different.
@@ -316,25 +389,24 @@ def test_the_same_child_cannot_be_registered_twice(client):
 
 def test_twins_are_two_students(client):
     headers = _teacher(client, "+919100000051")
-    nursery = client.post(CLASSES, json={"name": "Nursery"}, headers=headers).json()
+    nursery = _class(client, headers, "Nursery")
 
-    first = client.post(
-        STUDENTS, json=_student("Aarav", class_id=nursery["class_id"]), headers=headers
-    )
-    twin = client.post(
-        STUDENTS, json=_student("Arjun", class_id=nursery["class_id"]), headers=headers
-    )
+    first = _register(client, headers, name="Aarav", class_id=nursery["class_id"])
+    twin = _register(client, headers, name="Arjun", class_id=nursery["class_id"])
 
-    assert first.status_code == twin.status_code == 201
+    # Two rows, not one refused as a duplicate.
+    assert first["student_id"] != twin["student_id"]
 
 
 def test_a_different_detail_is_a_different_child(client):
     headers = _teacher(client, "+919100000052")
-    nursery = client.post(CLASSES, json={"name": "Nursery"}, headers=headers).json()
-    client.post(STUDENTS, json=_student(class_id=nursery["class_id"]), headers=headers)
+    nursery = _class(client, headers, "Nursery")
+    _register(client, headers, class_id=nursery["class_id"])
 
-    other = _student(class_id=nursery["class_id"], date_of_birth="2021-05-01")
-    assert client.post(STUDENTS, json=other, headers=headers).status_code == 201
+    other = _register(
+        client, headers, class_id=nursery["class_id"], date_of_birth="2021-05-01"
+    )
+    assert other["student_id"] == "ST_000002"
 
 
 # --- Restore -----------------------------------------------------------------
@@ -343,39 +415,28 @@ def test_a_different_detail_is_a_different_child(client):
 def test_restore_creates_the_class_and_keeps_student_ids(client):
     headers = _teacher(client, "+919100000015")
 
-    restored = client.post(
-        CLASSES,
-        json={
-            "name": "Nursery",
-            "students": [
-                _student("Kabir", student_id="ST_000007"),
-                _student("Diya", student_id="ST_000003"),
-            ],
-        },
-        headers=headers,
-    )
-    assert restored.status_code == 201
+    class_id = _class(
+        client,
+        headers,
+        "Nursery",
+        students=[
+            _student("Kabir", student_id="ST_000007"),
+            _student("Diya", student_id="ST_000003"),
+        ],
+    )["class_id"]
 
     students = client.get(STUDENTS, headers=headers).json()
     assert {s["student_id"] for s in students} == {"ST_000007", "ST_000003"}
-    assert {s["class_id"] for s in students} == {restored.json()["class_id"]}
+    assert {s["class_id"] for s in students} == {class_id}
 
     # The next registration is not handed an id that just came back.
-    fresh = client.post(
-        STUDENTS,
-        json=_student("Aarav", class_id=restored.json()["class_id"]),
-        headers=headers,
-    ).json()
+    fresh = _register(client, headers, name="Aarav", class_id=class_id)
     assert fresh["student_id"] == "ST_000008"
 
 
 def test_restore_gives_foreign_ids_fresh_ones(client):
     headers = _teacher(client, "+919100000016")
-    client.post(
-        CLASSES,
-        json={"name": "Nursery", "students": [_student(student_id="GB-0007")]},
-        headers=headers,
-    )
+    _class(client, headers, "Nursery", students=[_student(student_id="GB-0007")])
     [student] = client.get(STUDENTS, headers=headers).json()
     assert student["student_id"] == "ST_000001"
 
@@ -383,10 +444,16 @@ def test_restore_gives_foreign_ids_fresh_ones(client):
 def test_restoring_the_same_file_twice_is_refused_whole(client):
     headers = _teacher(client, "+919100000017")
     archive = [_student(student_id="ST_000001")]
-    client.post(CLASSES, json={"name": "Nursery", "students": archive}, headers=headers)
+    _class(client, headers, "Nursery", students=archive)
 
     again = client.post(
-        CLASSES, json={"name": "Nursery Again", "students": archive}, headers=headers
+        CLASSES,
+        json={
+            "name": "Nursery Again",
+            "teacher_id": helpers.teacher_id_of(client, _token(headers)),
+            "students": archive,
+        },
+        headers=helpers.auth(helpers.admin_token(client)),
     )
     assert again.status_code == 409
 

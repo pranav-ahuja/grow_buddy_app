@@ -46,11 +46,14 @@ void loginSignUpPopUpCard(BuildContext context) {
                 verticalPadding: kElevatedButtonVerticalPadding,
                 elevatedButtonFontWeight: FontWeight.w500,
                 elevatedButtonTextSize: kElevatedButtonTextSize,
+                // Phone + OTP is the default way in. GB_MobileLogin links
+                // on to Google and to the password form, so nothing is
+                // lost by not landing on GB_Login first.
                 onPressed: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => GB_Login(),
+                      builder: (context) => GB_MobileLogin(),
                     ),
                   );
                 },
@@ -83,15 +86,17 @@ void loginSignUpPopUpCard(BuildContext context) {
                     // Routing from here clears the whole stack, dialog included.
                     onPressed: () => gSignInWithGoogle(context),
                   ),
+                  // The @ leads to the email/password form. It used to be a
+                  // phone icon, which now duplicates the Login button above.
                   GB_ElevatedButtonIcons(
-                    elevatedButtonIcon: MaterialSymbols.call,
+                    elevatedButtonIcon: MaterialSymbols.alternate_email,
                     elevatedButtonIconSize: kElevatedButtonIconSize,
                     elevatedButtonPadding: kEvelatedButtonPadding,
                     onPressed: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => GB_MobileLogin(),
+                          builder: (context) => GB_Login(),
                         ),
                       );
                     },
