@@ -68,8 +68,8 @@ class GB_ClassArchive {
   /// column added here later does not invalidate files written today.
   ///
   /// "Roll Number" is written for the teacher reading the spreadsheet and
-  /// ignored on restore — roll numbers are alphabetical within a class, so the
-  /// server works them out afresh.
+  /// ignored on restore — the server works roll numbers out from the student
+  /// ids, which a restore keeps, so the order comes back as it was.
   static const List<String> studentColumns = <String>[
     "Student ID",
     "Roll Number",

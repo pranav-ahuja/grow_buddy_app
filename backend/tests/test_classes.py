@@ -306,7 +306,10 @@ def test_a_student_cannot_be_filed_in_someone_elses_class(client):
     assert response.status_code == 404
 
 
-def test_roll_numbers_are_alphabetical_and_renumber(client):
+def test_roll_numbers_follow_registration_order(client):
+    """Rewritten 2026-09-27 (migration 0009). Roll numbers used to be
+    alphabetical, so a new pupil could take an existing classmate's number;
+    they are in registration order now, and a newcomer gets the next one."""
     headers = _teacher(client, "+919100000040")
     nursery = _class(client, headers, "Nursery")
     class_id = nursery["class_id"]
@@ -320,20 +323,18 @@ def test_roll_numbers_are_alphabetical_and_renumber(client):
             for s in client.get(STUDENTS, headers=headers).json()
         }
 
-    # Alphabetical regardless of the order they were registered in, and
-    # regardless of case.
-    assert rolls() == {"aarav": 1, "Diya": 2, "Kabir": 3}
+    assert rolls() == {"Kabir": 1, "aarav": 2, "Diya": 3}
 
-    # A student joining earlier in the alphabet moves everyone after them.
+    # A new pupil gets the next number, whatever their name; nobody else moves.
     _register(client, headers, name="Bela", class_id=class_id)
-    assert rolls() == {"aarav": 1, "Bela": 2, "Diya": 3, "Kabir": 4}
+    assert rolls() == {"Kabir": 1, "aarav": 2, "Diya": 3, "Bela": 4}
 
-    # A student leaving closes the gap.
+    # A pupil leaving still closes the gap behind them.
     db = _db()
-    db.execute(delete(Student).where(Student.name == "Bela"))
+    db.execute(delete(Student).where(Student.name == "aarav"))
     db.commit()
     db.close()
-    assert rolls() == {"aarav": 1, "Diya": 2, "Kabir": 3}
+    assert rolls() == {"Kabir": 1, "Diya": 2, "Bela": 3}
 
 
 def test_roll_numbers_restart_in_each_class(client):
@@ -348,6 +349,8 @@ def test_roll_numbers_restart_in_each_class(client):
 
 
 def test_the_roster_is_the_class_as_a_table(client):
+    """Rewritten 2026-09-27: roll numbers are in registration order (0009),
+    so Kabir, registered first, is 1."""
     headers = _teacher(client, "+919100000042")
     nursery = _class(client, headers, "Nursery")
     for name in ("Kabir", "Aarav"):
@@ -358,8 +361,8 @@ def test_the_roster_is_the_class_as_a_table(client):
         (r["class_id"], r["class_name"], r["roll_number"], r["student_name"])
         for r in roster
     ] == [
-        (nursery["class_id"], "Nursery", 1, "Aarav"),
-        (nursery["class_id"], "Nursery", 2, "Kabir"),
+        (nursery["class_id"], "Nursery", 1, "Kabir"),
+        (nursery["class_id"], "Nursery", 2, "Aarav"),
     ]
 
 

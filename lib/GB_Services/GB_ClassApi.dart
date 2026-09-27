@@ -32,7 +32,7 @@ class GB_ActionResult {
   /// including on a delete, which produces nothing.
   final GB_ClassInfo? classInfo;
 
-  /// The pupil that was registered, on a principal's registration.
+  /// The pupil that was registered. Any registration, a teacher's included.
   final GB_Student? student;
 
   /// The request now waiting, on a teacher's.
@@ -196,6 +196,26 @@ class GB_ClassApi {
     final Map<String, dynamic> json = await GB_ApiClient.postJson(
       kStudentsUrl,
       studentToJson(student),
+      token: token,
+    );
+    return GB_ActionResult.fromJson(json);
+  }
+
+  /// Saves a pupil's edited details. Outright for staff — no approval — and
+  /// the server tells the pupil's linked parents if a mobile number changed.
+  ///
+  /// Sends every field, as registration does; the class and id are dropped
+  /// because an edit does not move the pupil.
+  static Future<GB_ActionResult> updateStudent({
+    required String token,
+    required GB_Student student,
+  }) async {
+    final Map<String, dynamic> body = studentToJson(student)
+      ..remove("student_id")
+      ..remove("class_id");
+    final Map<String, dynamic> json = await GB_ApiClient.patchJson(
+      "$kStudentsUrl/${student.studentId}",
+      body,
       token: token,
     );
     return GB_ActionResult.fromJson(json);

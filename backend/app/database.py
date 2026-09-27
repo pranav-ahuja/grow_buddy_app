@@ -32,8 +32,8 @@ def get_db() -> Generator[Session, None, None]:
 # asked for; teacher_id and student_id are there so the API can scope and join
 # on it.
 #
-# A view rather than a table because roll numbers are alphabetical and
-# renumber when a student leaves. Stored, every registration, rename, or
+# A view rather than a table because roll numbers are in registration order
+# (by student_id, since 0009) and renumber when a student leaves. Stored, every registration, rename, or
 # departure would mean rewriting the roll numbers of the whole class, and a
 # missed rewrite would leave two students sharing a number. Computed on every
 # read, they cannot drift. student_id breaks ties, so two children with the

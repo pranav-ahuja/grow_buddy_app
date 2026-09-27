@@ -17,8 +17,8 @@ Where things stand:
 
 - The app builds and runs. `flutter devices` sees the phone (`223170c0`), an
   emulator, Windows, Chrome and Edge.
-- The backend runs on **PostgreSQL 18** and its **222 tests pass**. Its schema
-  is Alembic's as of 2026-09-17, at revision `0006`.
+- The backend runs on **PostgreSQL 18** and its **270 tests pass** (2026-09-27). Its schema
+  is Alembic's as of 2026-09-17, at revision `0009`.
 - The six-phase role rebuild is **finished**. The principal is the school's
   **administrator**: they create and delete classes, register and remove
   pupils, and choose who teaches what. A teacher doing any of those four
@@ -34,7 +34,7 @@ Two commands cover most work:
 
 ```powershell
 # backend (from backend/)
-.venvScriptspython.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 # app
 C:\src\flutter\bin\flutter.bat run
 ```
@@ -118,7 +118,7 @@ lib/
 │   │   ├── GB_Dashboard.dart              reads the role, shows the matching dashboard
 │   │   ├── GB_HomeDashboard.dart          the shared dashboard body + GB_DashboardPermissions
 │   │   ├── GB_PrincipalDashboard.dart     every class in the school; admin powers; Fee tab
-│   │   ├── GB_TeacherDashboard.dart       classes they take; the same four acts, as requests
+│   │   ├── GB_TeacherDashboard.dart       classes they take; registers pupils, asks for the rest
 │   │   ├── GB_StudentDashboard.dart       the parent's portal: child picker, class, attendance
 │   │   ├── GB_NotificationsScreen.dart    the notification tab, and the principal's approvals
 │   │   ├── GB_NotificationStore.dart      this device's copy of it, and the bell's badge
@@ -126,6 +126,7 @@ lib/
 │   │   ├── GB_HomeModels.dart             GB_Event
 │   │   ├── GB_HomeWidgets.dart            event card, class tile, add-class tile, carousel dots
 │   │   ├── GB_Profile.dart                the signed-in user + profile picture
+│   │   ├── GB_EditProfileSheet.dart       edit your own name; verify a new email or number
 │   │   └── GB_Settings.dart               placeholder + the app's only logout
 │   └── GB_Classes/
 │       ├── GB_ClassScreen.dart            one class: features row + students row
@@ -232,6 +233,55 @@ new but is still incomplete. `isNewUser` only picks the wording.
   outright — cheap to trigger, and expensive to undo when getting back in means
   waiting on an OTP mid-lesson. `gSignOut` is still the contract; the
   confirmation wraps it so a future second Logout inherits the guard.
+- **Editing your own basic details** (2026-09-26): **Edit** on the profile
+  screen opens `GB_EditProfileSheet` — name, email address, mobile number.
+  - **The name saves straight away; a contact has to be proved first.** A name
+    is a label, so it goes to `PATCH /auth/me` and is done. An email or a
+    number is what the account *signs in with*, so it goes through
+    `POST /auth/me/contact/request` and then `/contact/verify`: the typed value
+    waits in `contact_change_codes` and only reaches `users` when a code sent
+    to it comes back. Until then the old contact still logs the person in.
+  - **Why not save it and flag it unverified.** `users.phone` is what
+    `/auth/otp/verify` and `/auth/login` look an account up by, and phone + OTP
+    is the default login screen. Writing an unproven number there makes it the
+    number they have to log in with, while `is_phone_verified = false` records,
+    too late, that nobody proved they could receive anything at it — one typo
+    and the account is unreachable by the flow the app opens on. Staged, an
+    abandoned change costs nothing.
+  - **The button at the bottom becomes Verify** the moment a contact stops
+    matching the account — not Done, which over an unverified number would
+    claim the edit had finished while the account had not moved at all. It
+    names which one ("Verify mobile number"), and takes the **number first**
+    when both have changed: a code belongs to one value, so they are proved one
+    at a time and the email's turn comes when the sheet returns.
+  - **The code is printed at the bottom of the code step in debug builds**, and
+    in the SnackBar as login does it. Both, because a modal bottom sheet is
+    painted over the SnackBar — on this screen the snack is the one place the
+    code cannot be read. `kDebugMode` is the half of that guard a release build
+    carries with it, so `OTP_DEBUG_RETURN` left on in production still cannot
+    put a code on a real user's screen.
+  - **After a verify the sheet shows only the new value.** The fields are
+    re-based on what the server returned — the phone field is keyed on the
+    committed number so Flutter rebuilds it rather than reusing the old state —
+    the Verify prompt goes, and the confirmation names the value that is now on
+    the account and not the one it replaced.
+  - **The existing OTP generation is reused** — `generate_otp`, `hash_otp`, the
+    5-minute expiry, the 5 attempts, the 30-second cooldown — but on a
+    **separate table**, for the reason `password_reset_codes` is separate: an
+    `OtpCode` is redeemable for a login token *and resolves the account from
+    the number in the request*, so a code that could be either kind could be
+    spent creating a second account for the new number, or logging in as
+    whoever already holds it. The new table is keyed by `user_id` and can do
+    exactly one thing.
+  - **The role is not editable here**, deliberately: it decides what the whole
+    app will let the account do. Note that `PATCH /auth/me` still *accepts*
+    `account_type` from anyone — see the known gap below.
+  - **Neither contact can be cleared**, and a taken one is refused twice — once
+    when the code is asked for, and again when it is redeemed, because the
+    column is unique and somebody may have claimed it in between. That second
+    check is the same rule `app/approvals.py` follows when it grants a request.
+  - The email code is **logged, not emailed**, exactly as SMS is. Migration
+    `0007`. 17 tests in `test_contact_change.py`.
 - **Teacher dashboard**: the class list from the server, with a live student
   count per tile; reloads on open, on resume, and on pull-to-refresh; clears its
   stores on sign-out.
@@ -242,7 +292,64 @@ new but is still incomplete. `isNewUser` only picks the wording.
   a class can restore one back, students and their original `ST_` ids included,
   in a single server transaction.
 - **Students**: the register-student form (with optional photo), server-assigned
-  ids, alphabetical roll numbers, and a duplicate-child rule.
+  ids, roll numbers in **registration order** (a new pupil gets the next
+  number and nobody else's changes — migration `0009`; they were alphabetical
+  before), and a duplicate-child rule. The student card
+  and the "added" confirmation show the **roll number, not the `ST_` id**
+  (2026-09-27) — the id is a database key, like the user id on the profile.
+  The class screen has a floating **"Add student"** button for staff
+  (2026-09-27), opening the form with that class preselected; the principal
+  sees it stacked under "Add teacher".
+- **Editing a pupil** (2026-09-27): holding a student card offers **Edit** or
+  **Cancel**. Edit opens the register sheet in edit mode — prefilled, class
+  locked, **Delete** beside **Save**. Delete lives only there, so removing a
+  child always passes an open record and a confirmation first.
+  - **Saving is outright** for a teacher of the class or the principal
+    (`PATCH /students/{id}`). An edit destroys nothing another edit cannot put
+    back; removal is the act that waits for the principal, and a teacher's
+    Delete still raises a `student_remove` request.
+  - **A changed mobile (mother's, father's or guardian's) notifies every
+    parent account linked to that pupil** — no approval, one notice naming the
+    new number or saying it was removed. Compared after normalising, so a
+    number retyped with spaces is not a change. Nobody linked means nobody is
+    told; the edit still saves.
+  - The duplicate-child rule applies to edits, excluding the pupil
+    themselves. 12 tests in `test_student_edit.py`.
+- **Parents mapped to pupils by their login** (2026-09-27, migration `0008`):
+  the mother's and father's mobile and email on the register form are the
+  parents' logins. `student_mapping` (renamed from `student_guardians`) gets a
+  row for every parent account whose **verified** phone or email is on a
+  pupil's record — `app/student_mapping.py`.
+  - **Case 1** (account first): registering, restoring or editing a pupil maps
+    the existing accounts. **Case 2** (pupil first): signing in with OTP or
+    Google, picking the student role, or confirming a new contact maps the
+    account's pupils. Every sign-in re-checks. A mapping row holds both ids,
+    so it is written once both exist rather than user id first.
+  - **Mother and father keep separate accounts** and see the same children;
+    one account sees every child carrying its number.
+  - **Verified only**, and this is the part that makes automatic mapping safe:
+    a phone is proved by an OTP login or a confirmed change, an email by
+    Google or a confirmed change (`users.is_email_verified`, new in `0008`). A
+    password sign-up with the mother's number maps nothing until that account
+    logs in once with OTP.
+  - **A parent changing their own number** (confirmed by code) moves it onto
+    `users` *and* onto every mapped pupil's `mother_mobile`/`father_mobile`
+    where the old number was, and each class teacher gets a notice — no
+    approval. Emails behave the same way.
+  - **A teacher changing a number on the record** re-maps: the account the old
+    number belonged to loses the pupil (and is told), the new one gains it.
+    Links staff made by hand (`source = staff`) are never removed.
+  - **Numbers are stored with their country code.** The register/edit form's
+    three mobiles use a country picker (`GB_SheetPhoneField`, India unless
+    changed, or the country of the number being edited) and send the full
+    `+<code><number>`, stored as sent. A number that arrives *without* a code
+    — a class file, a direct API call — is taken as Indian by
+    `normalize_phone`: `9876543210`, `09876543210` and `919876543210` all
+    become `+919876543210`. Until `0009` the register form kept
+    numbers as typed while logins were always `+91…`, so the two never matched
+    and no parent was ever mapped; `0009` rewrote the stored numbers and
+    mapped the parents that then matched.
+  - 19 tests in `test_student_mapping.py`.
 - **Tests**: `testcases/` (unit + widget, no device or server needed) and
   `integration_test/` (real device against a real backend). See
   `testcases/README.md` — one command, one table of results.
@@ -421,11 +528,14 @@ since phase 2.
 - **Many-to-many**, because a parent may have two children at the school and a
   child may have two parents who each want the app. That is why the dashboard
   has a child picker rather than one name.
-- **Only staff create links.** A parent cannot claim a child by asserting they
-  are the parent — get that wrong and a stranger has a child's address,
-  attendance and contact numbers. The teacher who registered the pupil, or the
-  principal, makes the link, naming the account by **email or phone** (what
-  they have in front of them, not a `U_` id).
+- **Only staff create links.** *(Superseded 2026-09-27 by migration `0008` —
+  links are now made automatically from verified contacts; see "Parents mapped
+  to pupils by their login" under What Works Today. The manual route below
+  still exists for the exceptions.)* A parent cannot claim a child by
+  asserting they are the parent — get that wrong and a stranger has a child's
+  address, attendance and contact numbers. The teacher who registered the
+  pupil, or the principal, makes the link, naming the account by **email or
+  phone** (what they have in front of them, not a `U_` id).
   - A self-service claim — "my number is on that child's record, link me" — is
     deliberately absent. It needs an approval step, which is phase 5.
   - `matches_registered_contact` on the response says whether that account's
@@ -464,6 +574,18 @@ in `backend/README.md`'s production checklist. Note this matters more now than
 it did: an admin account creates and deletes classes and removes pupils
 outright.
 
+**Known gap, not yet decided — `PATCH /auth/me` also accepts `account_type`
+from anyone, at any time.** `apply_role` sets the role unconditionally and the
+route never checks whether one was already set, so **any signed-in teacher can
+make themselves the principal in one request** — and since phase 5 that is the
+account which deletes classes and removes pupils. It is the same self-service
+admin hole as sign-up but sharper, because it needs no new account and leaves
+the teacher's own classes attached to them. The field exists for profile
+completion, where the role starts null and is picked once; the fix is to refuse
+it when `role` is already set, which `GB_CompleteProfile` would never notice.
+Found 2026-09-26 while building the profile edit sheet — which is why that sheet
+never sends `account_type`, though a client not sending it is not a fix.
+
 > **Two real privilege holes, found by the tests that were written to look for
 > them.** Widening `readable_class` to include guardians leaked into two places
 > it should not have: a linked parent could **register pupils** into their
@@ -490,7 +612,7 @@ acts it moves are the four the app was built around.
     `TR_` row, so a class they create is filed under the teacher they pick or
     under **nobody** — never under the principal. `require_teacher` still
     refuses them, and its docstring now says what that does and does not mean.
-- **A teacher asks.** The same four acts, from a teacher, produce a
+- **A teacher asks.** Three of the four acts, from a teacher, produce a
   `change_requests` row and **change nothing else at all**. No greyed-out
   tile, no provisional pupil, no count that includes something unagreed. Their
   dashboard after asking looks exactly as it did before, and the request is
@@ -500,6 +622,14 @@ acts it moves are the four the app was built around.
     They are reversible in one tap and destroy nothing, and a queue filled
     with colour changes is a queue the principal stops reading — which is
     what would make the deletions in it dangerous.
+  - **Registering a pupil left the list on 2026-09-27.** A teacher's
+    registration goes straight in (`201`, `status: "done"`), and every
+    principal gets a notice (`student_registered_message`) with no
+    `request_id`, so it carries no Approve or Reject. Adding a child destroys
+    nothing and is undone by removing them. Removing a pupil **still** needs
+    approval: it takes their attendance history with it, and there is no class
+    file to restore them from. `student_add` stays a valid request kind, so
+    requests raised before the change can still be answered.
 - **`classes.teacher_id` is nullable now.** An unassigned class is one the
   principal made in August before anyone was given their year. It is a real
   class: it appears on the school's dashboard, holds its name against
@@ -576,18 +706,27 @@ decision.
   messages, events and diary notes have no tables anywhere in the project**.
   The screen names them under "Coming soon" rather than faking rows. See The
   Role Rebuild, phase 6.
-- **Linking a parent from the app** — `POST /students/{id}/guardians` exists
-  and is tested, but no screen calls it. Until one does, a link has to be made
-  with curl or from `/docs`, and an unlinked parent sees "ask your child's
-  teacher" forever.
+- **Manual parent linking from the app** — no longer the main path: since
+  `0008` a parent is mapped automatically by their verified number or email.
+  `POST /students/{id}/guardians` remains for the exceptions (a grandparent, a
+  parent whose contact is not on the record) and still has no screen.
+- **Email verification at sign-up** — an email is only proved by Google
+  sign-in or a confirmed email change, so a parent who signs up with email +
+  password is not mapped by email. The phone + OTP login, which is the default
+  screen, has no such gap.
 - **Settings** — nothing is configurable yet; the screen exists so the menu
   item goes somewhere real, and because it is where Logout now lives.
-- **Editing a profile** — `GB_Profile` only displays. The form that writes
-  `PATCH /auth/me` is `GB_CompleteProfile`; an "Edit" action here should reuse
-  it rather than grow a second one.
+- **Editing a profile — built (2026-09-26), see below.** `GB_Profile` grew an
+  Edit action. The plan recorded here was to reuse `GB_CompleteProfile`; that
+  turned out to be the wrong shape and a sheet was written instead. What is
+  still not editable from the app is the **role** — deliberately — and the
+  teacher profile fields from phase 4.
 - **"See All"** on the class screen's student list.
 - **iOS Google Sign-In** — `kGoogleIosClientId` is still empty.
-- **SMS** — `request_otp()` logs the code instead of sending it.
+- **SMS, and now email** — `request_otp()` logs the code instead of sending
+  it, and `request_contact_change()` does the same for both channels. There is
+  no email provider wired up at all, so an email verification code is only ever
+  readable in the server log or, in a debug build, the SnackBar.
 
 ## Backend
 Python 3.12 + FastAPI + SQLAlchemy in `backend/`. Seven routers: `auth`,
@@ -600,7 +739,8 @@ changing any of them:
 - **`app/school.py`** — the four acts themselves: create a class, delete
   one, register a pupil, remove one. They live here because they have **two**
   callers now, the direct route and the approval that grants a teacher's
-  request. The alternative was the approval path re-implementing "add a
+  request. (Registration has been called only from the direct route since
+  2026-09-27, plus approvals of `student_add` requests raised before then.) The alternative was the approval path re-implementing "add a
   class", and the two drifting until a granted request did something the
   direct call would have refused.
 - **`app/approvals.py`** — raising a request, granting it, refusing it. The
@@ -622,7 +762,9 @@ source of truth for request/response shapes.
 | `POST /auth/login` | email or phone + password |
 | `POST /auth/otp/request` `POST /auth/otp/verify` | 30s resend cooldown; verify doubles as sign-up |
 | `POST /auth/google` | takes a Google **ID token**, never an email |
-| `GET /auth/me` `PATCH /auth/me` | read, and complete, the profile |
+| `GET /auth/me` `PATCH /auth/me` | read, and complete, the profile. PATCH fills in a **missing** email or phone; replacing one goes through the two rows below |
+| `POST /auth/me/contact/request` | send a code to an email or number you are moving to. **Changes nothing** — 400 if it is already yours, 409 if it is somebody else's, 429 inside the 30s cooldown |
+| `POST /auth/me/contact/verify` | redeem the code. This is the write that moves the contact, and for a phone it is the only thing that sets `is_phone_verified` |
 | `GET /classes` | the classes a teacher takes, owned **or** co-taught — or every class in the school for a principal |
 | `POST /classes` | principal → created at once, under the `teacher_id` they name or unassigned. Teacher → **202** and a pending request |
 | `PATCH /classes/{id}` | rename/recolour. The class teacher or the principal; a co-teacher gets 403. No approval needed |
@@ -630,7 +772,8 @@ source of truth for request/response shapes.
 | `PUT /classes/{id}/teachers` | principal only — **who teaches this class**, as the whole set. Empty unassigns it |
 | `GET /classes/{id}/roster` | class id, class name, roll number, student name. A teacher's own class, any class for a principal; someone else's reads 404, not 403 |
 | `GET /students` | every student of the signed-in teacher — or of the whole school for a principal |
-| `POST /students` | principal into any class → created at once. Teacher → **202** and a pending request |
+| `POST /students` | principal into any class, teacher into a class they take → created at once (**201**). A teacher's registration notifies the principals (since 2026-09-27) |
+| `PATCH /students/{id}` | edit a pupil's details, the whole record. Staff only, **no approval**. A changed mobile notifies the pupil's linked parents. The class cannot be changed here |
 | `DELETE /students/{id}` | principal → 200 `done`. Teacher → **202** and a pending request. Staff only |
 | `GET /subjects` | approved subjects + your own proposals; everything for a principal |
 | `POST /subjects` | principal → approved at once; teacher → a `pending` proposal |
@@ -643,7 +786,7 @@ source of truth for request/response shapes.
 | `POST /teachers/{id}/experience` `DELETE …/experience/{n}` | previous posts; own record, or any for a principal |
 | `PUT /teachers/{id}/subjects` | principal only. The **whole set**, and approved subjects only |
 | `PATCH /classes/{id}/teacher` | principal only — "add a teacher to a class". Students move with it |
-| `GET/POST /students/{id}/guardians` `DELETE …/guardians/{u}` | staff only — links a parent's account to a pupil. A parent cannot link themselves |
+| `GET/POST /students/{id}/guardians` `DELETE …/guardians/{u}` | staff only — lists, or **manually** adds and removes, rows in `student_mapping`. Most rows are automatic since `0008`; a manual one is never auto-removed. A parent cannot link themselves |
 | `GET /requests` | the whole queue for a principal, your own rows for a teacher. `?status=pending` is what the bell opens on. A parent gets 403 |
 | `POST /requests/{id}/approve` | principal only — runs the change and returns what it produced. 409 if it was already answered |
 | `POST /requests/{id}/reject` | principal only, with an optional `note` the teacher is shown |
@@ -663,6 +806,10 @@ Readable ids from a counter table — `U_000001`, `TR_000001`, `CL_000001`,
 numbers are never reused, which is what lets a restored class file bring its
 students back under their old ids. Each table also carries a UUID for anywhere
 an id is shown outside the app.
+
+**Full diagrams of every table, column and relation are in
+[docs/DATABASE.md](DATABASE.md)** (Mermaid, drawn 2026-09-27 at `0009`). The
+sketch below is the short version.
 
 **The tables, and how they connect** (verified against PostgreSQL 18,
 2026-09-18):
@@ -701,11 +848,12 @@ must not take the subject list or the attendance history with them.
 | `class_teachers` | pair | The **co-teachers** on a class, beside the owner. The class teacher is deliberately not repeated here — one fact, one place; `access.teacher_class_ids` unions the two halves. |
 | `change_requests` | int | A teacher asking the principal to create or delete a class, or add or remove a pupil. `payload` is the request's own copy of what to do, re-validated when it runs. Until it is granted **nothing else has changed**. |
 | `notifications` | int | One line in somebody's tab: `date` and `time` apart, a `source` in words, an audience of one `user_id` or a `broadcast`, and the message as **stored** text. A nullable `request_id` is what makes a line actionable. |
-| `student_guardians` | pair | Which account may see which pupil — a parent's link to their child. Many-to-many: a parent may have two children, a child two parents. **Only staff create rows.** |
+| `student_mapping` | pair | Which parent account may see which pupil (`student_guardians` until `0008`). Many-to-many: a parent may have several children, a child two parents on two accounts. `relationship` Mother/Father/Parent; `source` is `contact_match` (automatic, from a verified phone or email on the record, recomputed) or `staff` (by hand, never auto-removed). |
 | `attendance` | int | One mark per pupil per day: `uq_attendance_student_date` is unique, so re-marking updates. `status` CHECKed to `P`/`A`. `class_id` records the class the mark was taken in, so moving a pupil later cannot rewrite last term. |
 | `id_counters` | `prefix` | One row per id prefix (`U`, `TR`, `CL`, `ST`, `S`) holding `last_value`. |
 | `otp_codes` | int | Phone codes: `code_hash`, `expires_at`, `attempts`, `consumed_at`. |
 | `password_reset_codes` | int | As above plus `verified_at`, which separates "code proven" from "password changed". Table exists; the reset flow is still UI-only. |
+| `contact_change_codes` | int | A code proving somebody owns the email or number they are moving **their own** account to. Keyed by `user_id`, carries the `channel` and the `new_value` it was issued for, and can do exactly one thing: move that contact onto that user. The value lives here, not on `users`, until the code comes back. |
 
 Every foreign key is `ON DELETE CASCADE`, so removing a user takes their
 teacher row, classes and students with it. The two code tables are the
@@ -722,9 +870,9 @@ Things worth knowing before changing this:
   teacher's timetable — silently. `app.access.teacher_class_ids` is the one
   place that unions them. `class_roster.teacher_id` is the **owner**, so it is
   no longer a scope to filter by; `list_students` used to and had to change.
-- **Roll numbers are not stored.** They are alphabetical within a class and
-  renumber when a student leaves, so the `class_roster` **view** computes them
-  on every read. Stored, one missed rewrite would leave two students sharing a
+- **Roll numbers are not stored.** They follow registration order within a
+  class (by `student_id`, since `0009`) and renumber when a student leaves, so
+  the `class_roster` **view** computes them on every read. Stored, one missed rewrite would leave two students sharing a
   number.
 - **The duplicate-student rule** is a unique index over class + name + DOB +
   address + both parents' names, emails, and mobiles. The name is part of the
@@ -785,7 +933,7 @@ Things worth knowing before changing this:
   it used `create_all`, which only creates *missing* tables, so once a table
   existed, adding a column or widening a constraint did nothing, silently. The
   live database was backed up, stamped `0001`, and upgraded.
-  - `.venvScriptspython.exe -m alembic upgrade head` applies; `alembic
+  - `.venv\Scripts\python.exe -m alembic upgrade head` applies; `alembic
     current` says where a database is.
   - **The server checks but never migrates.** `main.py` refuses to start when
     the database is behind the code and prints the command. Deploying now
@@ -797,6 +945,13 @@ Things worth knowing before changing this:
     excludes it by name). **Read every generated migration.**
   - `backend/tests/` now builds its database by running the real migrations,
     so a broken migration fails the suite.
+- **`SECRET_KEY` must be set in `backend/.env`.** Empty, the server invents a
+  random signing key at every start — and under `--reload` every backend edit
+  is a start, so every phone is silently logged out: each request 401s while
+  the app still looks signed in. Set on 2026-09-27 after exactly that made a
+  student edit's Save appear to do nothing. Changing it logs everyone out once.
+  `--reload` watches `.py` files only, so an `.env` change needs a full
+  restart.
 - CORS is `allow_origins=["*"]` — fine for a LAN and Swagger, not for public.
 - `photo_path` is a path on the device that picked the photo; it will not
   resolve anywhere else. Cards fall back to the stock asset.
@@ -834,8 +989,22 @@ Things worth knowing before changing this:
 
 ## Verification
 
-_Backend and analyzer run 2026-09-20, after phase 5. The device checks are
-still from 2026-09-13._
+_Backend and analyzer run 2026-09-26, after the profile edit sheet. The device
+checks are still from 2026-09-13._
+
+- `cd backend && .venv\Scripts\python.exe -m pytest -q` — **239 passed** in
+  150s — the 222 below plus 17 in `test_contact_change.py`.
+- **The contact change was exercised by hand against PostgreSQL on 2026-09-26**,
+  both channels, through the running server: a code sent to a new number leaves
+  `GET /auth/me` showing the old one; a wrong code answers "Incorrect code. 4
+  attempt(s) left."; the right one moves the number and sets
+  `is_phone_verified`; the new number then logs in and the old one 401s. The
+  same for an email, including that a mixed-case address is stored lower-cased,
+  that a phone code cannot be redeemed on the email channel, and that a resend
+  inside 30s is refused. The probe account was deleted afterwards — the five
+  real accounts on that database were left untouched.
+
+The phase-5 figures below are unchanged, and the Flutter suite is still red:
 
 - `cd backend && .venv\Scripts\python.exe -m pytest -q` — **222 passed** in
   138s. That is the 176 that passed before phase 5 plus 46 new ones, and the
@@ -849,7 +1018,8 @@ still from 2026-09-13._
     principal in one call. The row is identical either way; both paths go
     through `app/school.py`. The files that are genuinely about who may do
     what — `test_approvals.py`, `test_class_teachers.py` — do it the long way.
-- `flutter analyze lib` — **clean**: no errors, no warnings.
+- `flutter analyze lib` — **clean**: no errors, no warnings (re-run 2026-09-26;
+  the only issues on the new files are the project's own `GB_` naming lints).
 - `dart run testcases/run_tests.dart --suite unit,widget` — **102 passed, 74
   failed** in 51s. The total fell from 188 to 176 because six files no longer
   compile.

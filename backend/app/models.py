@@ -119,6 +119,10 @@ class User(Base):
     role: Mapped[str | None] = mapped_column(String(16), default=None)
 
     is_phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # True once the address is proved to belong to this person: Google said so,
+    # or a contact-change code sent to it came back. A typed-in address stays
+    # false. Only a verified contact may link an account to a pupil.
+    is_email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -372,8 +376,8 @@ class Student(Base):
     than given a contacts table: there are always exactly three fixed slots,
     each optional, and it matches the class file spreadsheet column for column.
 
-    No roll number column. Roll numbers are alphabetical within a class and
-    renumber when a student leaves, so they are worked out on every read by the
+    No roll number column. Roll numbers follow registration order within a
+    class (since 0009) and renumber when a student leaves, so they are worked out on every read by the
     `class_roster` view instead of being stored and kept up to date by hand.
 
     Optional text is stored as "" rather than NULL, and the contact details are
@@ -628,35 +632,43 @@ class TeacherExperience(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
-class StudentGuardian(Base):
-    """Which account may see which pupil — the parent's link to their child.
+# How a student_mapping row came to exist. A contact match is recomputed and
+# may be removed when the numbers stop matching; a staff link never is.
+MAPPING_SOURCE_STAFF = "staff"
+MAPPING_SOURCE_CONTACT = "contact_match"
+MAPPING_SOURCES = (MAPPING_SOURCE_STAFF, MAPPING_SOURCE_CONTACT)
+_MAPPING_SOURCE_LIST = "', '".join(MAPPING_SOURCES)
+
+
+class StudentMapping(Base):
+    """Which parent account may see which pupil. Named `student_guardians`
+    until 0008.
 
     The app is for parents, so a "student" account is really a parent
-    operating on a child's behalf. Nothing joined the two before this: a
-    `students` row is created by a teacher from a paper form, and a
-    `users` row with role 'student' was just a role. Without this table a
-    parent who signs up cannot be shown anything at all.
+    operating on a child's behalf. **Many-to-many:** a parent may have two
+    children at the school, and a child's mother and father each have their
+    own account — both are mapped to the same pupil and see the same record.
 
-    **Many-to-many, deliberately.** A parent may have two children at the
-    school, and a child may have two parents who each want the app. Either as
-    a column would have capped the wrong side of that.
+    **Mostly filled automatically** (`source = contact_match`, see
+    [app.student_mapping]): a parent account whose *verified* phone or email
+    equals the mother's or father's on a pupil's record is mapped to that
+    pupil, whichever of the two existed first. Verified is the safety: the
+    number on the record is the one the school collected, and a code has to
+    reach it before an account can claim it — typing a mother's number into a
+    sign-up form proves nothing, and would otherwise hand a stranger the
+    child's address and attendance.
 
-    **Only staff create these rows.** A parent cannot claim a child by
-    asserting they are the parent — that is the one thing in this schema where
-    getting it wrong hands a stranger a child's address, attendance and
-    contacts. The teacher who registered the pupil, or the principal, makes
-    the link; the register-student form already collected the parents' names
-    and numbers, so the school is the party that actually knows.
-
-    A self-service claim ("my number is on that child's record, link me") is
-    the obvious convenience and is deliberately absent: it needs an approval
-    step, which is phase 5.
-
-    `linked_by_user_id` records who made the link, SET NULL so the link
-    outlives the staff member who made it.
+    Staff can still map an account by hand (`source = staff`, with
+    `linked_by_user_id`); those rows are never removed automatically.
     """
 
-    __tablename__ = "student_guardians"
+    __tablename__ = "student_mapping"
+    __table_args__ = (
+        CheckConstraint(
+            f"source IN ('{_MAPPING_SOURCE_LIST}')",
+            name="ck_student_mapping_source",
+        ),
+    )
 
     user_id: Mapped[str] = mapped_column(
         ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
@@ -671,10 +683,16 @@ class StudentGuardian(Base):
         index=True,
     )
 
-    # "Mother", "Father", "Grandmother" — free text, as on the student's own
-    # guardian block. Blank when nobody said.
-    relation: Mapped[str] = mapped_column(String(32), default="")
+    # "Mother" or "Father" from a contact match ("Parent" when one number is
+    # on both); free text when staff typed it. Blank when nobody said.
+    relationship: Mapped[str] = mapped_column(String(32), default="")
 
+    source: Mapped[str] = mapped_column(
+        String(16), default=MAPPING_SOURCE_STAFF
+    )
+
+    # Null for an automatic match. SET NULL so a staff link outlives the
+    # staff member who made it.
     linked_by_user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.user_id", ondelete="SET NULL"), default=None
     )

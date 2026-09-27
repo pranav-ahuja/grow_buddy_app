@@ -8,6 +8,7 @@ import 'package:grow_buddy_app/GB_Services/GB_ApiClient.dart';
 import 'package:grow_buddy_app/GB_Services/GB_ClassApi.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
+import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Globals.dart';
 import 'package:image_picker/image_picker.dart';
 
 /// What the photo chooser came back with. An enum rather than an [ImageSource]
@@ -30,12 +31,35 @@ enum _PhotoAction { camera, gallery, remove }
 ///
 /// Call [show]; it returns the registered student, or null if the teacher
 /// backed out, so the caller can react (the dashboard confirms with a snackbar).
+///
+/// [edit] opens the same form on an existing pupil: prefilled, the class
+/// locked, and **Delete** beside **Save**. Saving goes straight in for staff;
+/// deleting is a request to the principal from a teacher, as it always was.
 class GB_RegisterStudentSheet extends StatefulWidget {
-  const GB_RegisterStudentSheet({super.key, this.initialClassId});
+  const GB_RegisterStudentSheet({super.key, this.initialClassId, this.student});
 
   /// Preselects a class, for when the sheet is opened from inside one. Null
   /// from the dashboard, where no class is in context yet.
   final String? initialClassId;
+
+  /// The pupil being edited, or null when registering a new one.
+  final GB_Student? student;
+
+  /// Opens the form on [student]. Returns what the save or delete produced,
+  /// or null if the sheet was dismissed.
+  static Future<GB_ActionResult?> edit(
+    BuildContext context, {
+    required GB_Student student,
+  }) {
+    return showModalBottomSheet<GB_ActionResult>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext context) =>
+          GB_RegisterStudentSheet(student: student),
+    );
+  }
 
   static Future<GB_ActionResult?> show(
     BuildContext context, {
@@ -107,12 +131,61 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
   /// Blocks a second tap between validating and popping the sheet.
   bool _isSubmitting = false;
 
+  /// Why the last save or delete failed, shown above the buttons. Not a
+  /// SnackBar: the sheet is painted over the Scaffold's snack, so one would
+  /// be invisible and the button would appear to do nothing.
+  String? _submitError;
+
+  void _showSubmitError(GB_ApiException error) {
+    setState(() {
+      _isSubmitting = false;
+      _submitError = error.statusCode == 401
+          ? "Your session has expired. Log out from Settings and sign in "
+              "again, then retry."
+          : error.message;
+    });
+  }
+
   static const List<String> _genderOptions = ["Male", "Female"];
+
+  bool get _isEditing => widget.student != null;
 
   @override
   void initState() {
     super.initState();
     _classId = widget.initialClassId;
+
+    final GB_Student? student = widget.student;
+    if (student == null) return;
+
+    _classId = student.classId;
+    _nameController.text = student.name;
+    _dateOfBirth = student.dateOfBirth;
+    _dateOfBirthController.text = _formatDate(student.dateOfBirth);
+    _addressController.text = student.address;
+    // A restored class file can carry a blank gender; that stays unpicked
+    // rather than being guessed.
+    _gender = _genderOptions.contains(student.gender) ? student.gender : null;
+    _photoPath = student.photoPath;
+
+    final GB_StudentContact mother =
+        student.mother ?? const GB_StudentContact();
+    _motherNameController.text = mother.name;
+    _motherMobileController.text = mother.mobile;
+    _motherEmailController.text = mother.email;
+
+    final GB_StudentContact father =
+        student.father ?? const GB_StudentContact();
+    _fatherNameController.text = father.name;
+    _fatherMobileController.text = father.mobile;
+    _fatherEmailController.text = father.email;
+
+    final GB_StudentContact guardian =
+        student.guardian ?? const GB_StudentContact();
+    _guardianNameController.text = guardian.name;
+    _guardianRelationController.text = guardian.relation;
+    _guardianMobileController.text = guardian.mobile;
+    _guardianAddressController.text = guardian.address;
   }
 
   @override
@@ -155,20 +228,6 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
     return GB_ClassStore.classes.value.isEmpty
         ? "Add a class first"
         : "Choose a class";
-  }
-
-  /// Optional everywhere it is used, so an empty value passes. A filled one is
-  /// checked loosely on digit count only: numbers arrive with spaces, dashes,
-  /// and country codes, and a stricter pattern would reject valid ones.
-  String? _validateOptionalMobile(String? value) {
-    final String mobile = (value ?? "").trim();
-    if (mobile.isEmpty) return null;
-
-    final String digits = mobile.replaceAll(RegExp(r"\D"), "");
-    if (digits.length < 7 || digits.length > 15) {
-      return "Enter a valid mobile number";
-    }
-    return null;
   }
 
   String? _validateOptionalEmail(String? value) {
@@ -320,16 +379,58 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
     setState(() => _genderError = genderValid ? null : "Select a gender");
     if (!fieldsValid || !genderValid) return;
 
-    setState(() => _isSubmitting = true);
+    setState(() {
+      _isSubmitting = true;
+      _submitError = null;
+    });
+
+    final GB_StudentContact? mother = _contactOrNull(
+      name: _motherNameController,
+      mobile: _motherMobileController,
+      email: _motherEmailController,
+    );
+    final GB_StudentContact? father = _contactOrNull(
+      name: _fatherNameController,
+      mobile: _fatherMobileController,
+      email: _fatherEmailController,
+    );
+    final GB_StudentContact? guardian = _contactOrNull(
+      name: _guardianNameController,
+      mobile: _guardianMobileController,
+      address: _guardianAddressController,
+      relation: _guardianRelationController,
+    );
 
     try {
+      final GB_Student? editing = widget.student;
+      if (editing != null) {
+        final GB_ActionResult result = await GB_StudentStore.updateStudent(
+          GB_Student(
+            studentId: editing.studentId,
+            name: _nameController.text.trim(),
+            dateOfBirth: _dateOfBirth!,
+            gender: _gender!,
+            address: _addressController.text.trim(),
+            classId: editing.classId,
+            rollNumber: editing.rollNumber,
+            photoPath: _photoPath,
+            imagePath: editing.imagePath,
+            mother: mother,
+            father: father,
+            guardian: guardian,
+          ),
+        );
+        if (!mounted) return;
+        Navigator.of(context).pop(result);
+        return;
+      }
+
       // The server assigns the student id, so it is only known once this
       // returns — which is why the sheet waits rather than closing at once.
       //
-      // And it decides whether the pupil was registered at all: a principal's
-      // registration goes straight in, a teacher's becomes a request for
-      // approval. The result says which, and the caller words its
-      // confirmation from it rather than assuming.
+      // A teacher's registration goes straight in, as the principal's does,
+      // and the principal is notified (since 2026-09-27). The caller still
+      // words its confirmation from the result rather than assuming.
       final GB_ActionResult result = await GB_StudentStore.addStudent(
         name: _nameController.text,
         dateOfBirth: _dateOfBirth!,
@@ -337,22 +438,9 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
         address: _addressController.text,
         classId: _classId!,
         photoPath: _photoPath,
-        mother: _contactOrNull(
-          name: _motherNameController,
-          mobile: _motherMobileController,
-          email: _motherEmailController,
-        ),
-        father: _contactOrNull(
-          name: _fatherNameController,
-          mobile: _fatherMobileController,
-          email: _fatherEmailController,
-        ),
-        guardian: _contactOrNull(
-          name: _guardianNameController,
-          mobile: _guardianMobileController,
-          address: _guardianAddressController,
-          relation: _guardianRelationController,
-        ),
+        mother: mother,
+        father: father,
+        guardian: guardian,
       );
 
       if (!mounted) return;
@@ -361,8 +449,78 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
       if (!mounted) return;
       // The sheet stays open with everything the teacher typed, so a dropped
       // connection costs a retry rather than filling in the whole form again.
-      setState(() => _isSubmitting = false);
-      gShowSnack(context, error.message);
+      _showSubmitError(error);
+    }
+  }
+
+  /// Removes the pupil, or asks the principal to.
+  ///
+  /// Confirmed first, and worded for the role: a principal is about to delete
+  /// a child's record and their whole attendance history, with no class file
+  /// to bring them back from. A teacher is only about to ask.
+  Future<void> _delete() async {
+    final GB_Student student = widget.student!;
+    if (_isSubmitting) return;
+
+    final bool asksFirst = !gIsPrincipal();
+    final String className = GB_ClassStore.classes.value
+            .where((GB_ClassInfo item) => item.id == student.classId)
+            .map((GB_ClassInfo item) => item.name)
+            .firstOrNull ??
+        "their class";
+
+    final bool confirmed = await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) => AlertDialog(
+            backgroundColor: kPrimaryColor2,
+            title: Text(
+              asksFirst
+                  ? "Ask to delete ${student.name}?"
+                  : "Delete ${student.name}?",
+            ),
+            content: Text(
+              asksFirst
+                  ? "The principal will be asked to approve it. Nothing "
+                      "changes until they do."
+                  : "This removes them from $className along with their "
+                      "attendance record. It cannot be undone.",
+              style: const TextStyle(
+                fontSize: kEventSubtitleTextSize,
+                height: 1.4,
+                color: kHomeSubtitleTextColor,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.error,
+                ),
+                child: Text(asksFirst ? "Ask" : "Delete"),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed || !mounted) return;
+
+    setState(() {
+      _isSubmitting = true;
+      _submitError = null;
+    });
+    try {
+      final GB_ActionResult result =
+          await GB_StudentStore.removeStudent(student.studentId);
+      if (!mounted) return;
+      Navigator.of(context).pop(result);
+    } on GB_ApiException catch (error) {
+      if (!mounted) return;
+      _showSubmitError(error);
     }
   }
 
@@ -449,9 +607,12 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
             ),
           ),
           const SizedBox(height: 24.0),
-          const Text(
-            "Let's get your student list growing! Enter the details below.",
-            style: TextStyle(
+          Text(
+            _isEditing
+                ? "Edit ${widget.student!.name}'s details below."
+                : "Let's get your student list growing! Enter the details "
+                    "below.",
+            style: const TextStyle(
               fontSize: kSheetIntroTextSize,
               height: 24.0 / kSheetIntroTextSize,
               letterSpacing: 0.0256,
@@ -531,6 +692,18 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
               validator: (String? value) => _validateRequired(value, "address"),
             ),
             const SizedBox(height: 28.0),
+            // The parents' numbers and emails are their logins: an account
+            // that proves one of them sees this child automatically.
+            const Text(
+              "Parents log in to the app with the mobile number or email "
+              "entered below, and will see this child in their account.",
+              style: TextStyle(
+                fontSize: kEventSubtitleTextSize,
+                height: 1.4,
+                color: kHomeSubtitleTextColor,
+              ),
+            ),
+            const SizedBox(height: 16.0),
             const GB_SheetSectionHeader(
               title: "Mother's details",
               isOptional: true,
@@ -581,11 +754,9 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
               ],
             ),
             const SizedBox(height: kFieldGap),
-            GB_SheetTextField(
+            GB_SheetPhoneField(
               controller: _guardianMobileController,
               label: "Guardian's Mobile",
-              keyboardType: TextInputType.phone,
-              validator: _validateOptionalMobile,
             ),
             const SizedBox(height: kFieldGap),
             GB_SheetTextField(
@@ -611,27 +782,16 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: GB_SheetTextField(
-                controller: nameController,
-                label: nameLabel,
-                textCapitalization: TextCapitalization.words,
-              ),
-            ),
-            const SizedBox(width: kFieldRowGap),
-            Expanded(
-              child: GB_SheetTextField(
-                controller: mobileController,
-                label: "Mobile",
-                keyboardType: TextInputType.phone,
-                validator: _validateOptionalMobile,
-              ),
-            ),
-          ],
+        GB_SheetTextField(
+          controller: nameController,
+          label: nameLabel,
+          textCapitalization: TextCapitalization.words,
         ),
+        const SizedBox(height: kFieldGap),
+        // Full width, unlike the name beside it used to be: the country
+        // picker needs the room, and a half-width field left three digits
+        // visible.
+        GB_SheetPhoneField(controller: mobileController, label: "Mobile"),
         const SizedBox(height: kFieldGap),
         GB_SheetTextField(
           controller: emailController,
@@ -696,7 +856,11 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
                 ),
               )
               .toList(),
-          onChanged: (String? value) => setState(() => _classId = value),
+          // Locked when editing: this form edits the record, it does not move
+          // the pupil to another class.
+          onChanged: _isEditing
+              ? null
+              : (String? value) => setState(() => _classId = value),
         );
       },
     );
@@ -726,15 +890,49 @@ class _GB_RegisterStudentSheetState extends State<GB_RegisterStudentSheet> {
         kSheetHorizontalPadding,
         16.0,
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          GB_PillButton(
-            label: "Add to Class",
-            onPressed: _isSubmitting ? null : _submit,
-          ),
+          if (_submitError != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: Text(
+                _submitError!,
+                style: TextStyle(
+                  fontSize: kEventSubtitleTextSize,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ),
+          _buildFooterButtons(),
         ],
       ),
+    );
+  }
+
+  Widget _buildFooterButtons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        // Delete lives only here, inside the edit form, so removing a child
+        // always passes an open record and a confirmation first.
+        if (_isEditing) ...[
+          TextButton.icon(
+            onPressed: _isSubmitting ? null : _delete,
+            icon: const Icon(Icons.delete_outline),
+            label: const Text("Delete"),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+          ),
+          const Spacer(),
+        ],
+        GB_PillButton(
+          label: _isEditing ? "Save" : "Add to Class",
+          onPressed: _isSubmitting ? null : _submit,
+        ),
+      ],
     );
   }
 }

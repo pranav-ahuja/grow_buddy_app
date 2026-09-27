@@ -25,13 +25,13 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import codes
+from app import codes, student_mapping
 from app.database import class_roster
 from app.models import (
     Attendance,
     SchoolClass,
     Student,
-    StudentGuardian,
+    StudentMapping,
     Teacher,
     User,
 )
@@ -186,6 +186,7 @@ def create_class(
     db.add(school_class)
     db.flush()
 
+    restored: list[Student] = []
     for archived in payload.students:
         student_id = archived.student_id
         is_ours = (
@@ -211,13 +212,26 @@ def create_class(
         else:
             codes.reserve_code(db, codes.STUDENT, student_id)
 
-        db.add(
-            Student(
-                student_id=student_id,
-                class_id=school_class.class_id,
-                **archived.model_dump(exclude={"student_id"}),
-            )
+        student = Student(
+            student_id=student_id,
+            class_id=school_class.class_id,
+            **archived.model_dump(exclude={"student_id"}),
         )
+        db.add(student)
+        restored.append(student)
+
+    if restored:
+        try:
+            db.flush()
+        except IntegrityError as error:
+            db.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="The class file lists the same child twice",
+            ) from error
+        # A restored pupil's parents may already have accounts.
+        for student in restored:
+            student_mapping.sync_student(db, student)
 
     return school_class
 
@@ -231,6 +245,15 @@ def delete_class(db: Session, school_class: SchoolClass) -> None:
     on, and relying on it there would leave the students behind as orphans
     nothing lists.
     """
+    db.execute(
+        delete(StudentMapping).where(
+            StudentMapping.student_id.in_(
+                select(Student.student_id).where(
+                    Student.class_id == school_class.class_id
+                )
+            )
+        )
+    )
     db.execute(delete(Student).where(Student.class_id == school_class.class_id))
     db.delete(school_class)
 
@@ -239,15 +262,23 @@ def delete_class(db: Session, school_class: SchoolClass) -> None:
 
 
 def same_child(
-    db: Session, class_id: str, details: StudentDetails
+    db: Session,
+    class_id: str,
+    details: StudentDetails,
+    *,
+    excluding: str | None = None,
 ) -> Student | None:
     """A student already in [class_id] who is this child, by the duplicate rule.
 
     Compared in SQL with lower() on both sides, so the comparison is exactly
     the one the unique index enforces — Python's and the database's idea of
     lower case can differ outside plain English letters.
+
+    [excluding] is the pupil being edited, who always matches themselves.
     """
     conditions = [Student.class_id == class_id]
+    if excluding is not None:
+        conditions.append(Student.student_id != excluding)
     for field in _SAME_CHILD_TEXT:
         conditions.append(
             func.lower(getattr(Student, field))
@@ -259,9 +290,15 @@ def same_child(
 
 
 def reject_duplicate_child(
-    db: Session, school_class: SchoolClass, payload: StudentDetails
+    db: Session,
+    school_class: SchoolClass,
+    payload: StudentDetails,
+    *,
+    excluding: str | None = None,
 ) -> None:
-    existing = same_child(db, school_class.class_id, payload)
+    existing = same_child(
+        db, school_class.class_id, payload, excluding=excluding
+    )
     if existing is None:
         return
 
@@ -287,7 +324,33 @@ def create_student(
     )
     db.add(student)
     db.flush()
+    # Case 1: parents who already have accounts are mapped straight away.
+    student_mapping.sync_student(db, student)
     return student
+
+
+def update_student(
+    db: Session,
+    *,
+    student: Student,
+    school_class: SchoolClass,
+    payload: StudentDetails,
+) -> None:
+    """Replaces a pupil's details. Flushed, not committed.
+
+    The whole record, not a difference — the edit form sends every field, and
+    a field it left out would otherwise keep a value the teacher had cleared.
+    The class is not among them: moving a pupil is a different act.
+    """
+    reject_duplicate_child(
+        db, school_class, payload, excluding=student.student_id
+    )
+    for field, value in payload.model_dump().items():
+        setattr(student, field, value)
+    db.flush()
+    # A changed number maps the account it belongs to, and unmaps the one it
+    # used to.
+    student_mapping.sync_student(db, student)
 
 
 def delete_student(db: Session, student: Student) -> None:
@@ -308,8 +371,8 @@ def delete_student(db: Session, student: Student) -> None:
         delete(Attendance).where(Attendance.student_id == student.student_id)
     )
     db.execute(
-        delete(StudentGuardian).where(
-            StudentGuardian.student_id == student.student_id
+        delete(StudentMapping).where(
+            StudentMapping.student_id == student.student_id
         )
     )
     db.delete(student)

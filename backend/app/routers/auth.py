@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import student_mapping
 from app.accounts import apply_role, new_user
 from app.config import settings
 from app.deps import CurrentUser, DbSession
@@ -74,6 +75,7 @@ def _sync_google_profile(db: Session, user: User, profile: GoogleProfile) -> Non
         )
         if taken_by is None:
             user.email = profile.email
+            user.is_email_verified = True
         else:
             logger.warning(
                 "Google account %s now reports %s, already registered to user %s. "
@@ -88,6 +90,10 @@ def _sync_google_profile(db: Session, user: User, profile: GoogleProfile) -> Non
     # our own app with their Google profile name would be surprising.
     if profile.full_name and user.full_name in ("", PLACEHOLDER_FULL_NAME):
         user.full_name = profile.full_name
+
+    # Google vouching for the address the account already has.
+    if profile.email_verified and profile.email and profile.email == user.email:
+        user.is_email_verified = True
 
 
 def _token_response(user: User, *, is_new_user: bool = False) -> TokenResponse:
@@ -135,6 +141,9 @@ def signup(payload: SignUpRequest, db: DbSession) -> TokenResponse:
         password_hash=hash_password(payload.password),
     )
     apply_role(db, user, ACCOUNT_TYPE_TO_ROLE[payload.account_type])
+    # A password sign-up proves nothing about the phone or email typed in, so
+    # this maps nothing yet — the first OTP login, or a Google sign-in, will.
+    student_mapping.sync_user(db, user)
     db.commit()
     db.refresh(user)
 
@@ -163,6 +172,12 @@ def login(payload: LoginRequest, db: DbSession) -> TokenResponse:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This account has been disabled",
         )
+
+    # Every sign-in re-checks the mapping, so an account whose pupils were
+    # registered while nothing else was happening still finds them.
+    student_mapping.sync_user(db, user)
+    db.commit()
+    db.refresh(user)
 
     return _token_response(user)
 
@@ -262,6 +277,10 @@ def verify_otp_code(payload: OtpVerifyRequest, db: DbSession) -> TokenResponse:
     else:
         user.is_phone_verified = True
 
+    # Case 2: the code proved this number, so the pupils whose mother's or
+    # father's mobile it is become visible. A brand-new account has no role yet
+    # and maps nothing until it picks "student".
+    student_mapping.sync_user(db, user)
     db.commit()
     db.refresh(user)
 
@@ -343,8 +362,10 @@ def google_login(payload: GoogleLoginRequest, db: DbSession) -> TokenResponse:
             full_name=profile.full_name or PLACEHOLDER_FULL_NAME,
             email=trusted_email,
             google_id=profile.google_id,
+            is_email_verified=trusted_email is not None,
         )
 
+    student_mapping.sync_user(db, user)
     db.commit()
     db.refresh(user)
 
@@ -370,6 +391,8 @@ def update_profile(
     if payload.email is not None and payload.email != current_user.email:
         _reject_taken(db, User.email == payload.email, current_user, "email address")
         current_user.email = payload.email
+        # Typed into a form, so unproven — and unable to map a pupil.
+        current_user.is_email_verified = False
 
     if payload.phone is not None and payload.phone != current_user.phone:
         _reject_taken(db, User.phone == payload.phone, current_user, "phone number")
@@ -383,6 +406,9 @@ def update_profile(
     if payload.account_type is not None:
         apply_role(db, current_user, ACCOUNT_TYPE_TO_ROLE[payload.account_type])
 
+    # Picking "student" after an OTP sign-up is the usual moment a parent's
+    # pupils appear.
+    student_mapping.sync_user(db, current_user)
     db.commit()
     db.refresh(current_user)
     return current_user
@@ -562,12 +588,29 @@ def verify_contact_change(
     record.consumed_at = now
 
     if channel == CONTACT_CHANNEL_PHONE:
+        old_value = (
+            current_user.phone if current_user.is_phone_verified else None
+        )
         current_user.phone = record.new_value
         # Earned, not assumed: a code went to this number and came back.
         current_user.is_phone_verified = True
     else:
+        old_value = (
+            current_user.email if current_user.is_email_verified else None
+        )
         current_user.email = record.new_value
+        current_user.is_email_verified = True
 
+    # A parent's new number (or email) replaces the old one on their mapped
+    # pupils' records too, and the class teachers are told. Only a verified
+    # old value is carried: an unproven one never mapped anything.
+    student_mapping.carry_contact_change(
+        db,
+        current_user,
+        channel=channel,
+        old=old_value,
+        new=record.new_value,
+    )
     db.commit()
     db.refresh(current_user)
     return current_user

@@ -30,12 +30,32 @@ KNOWN_ACCOUNT_TYPES = (
 )
 
 
-def normalize_phone(raw: str) -> str:
-    """Strip formatting so the same number always hits the same DB row.
+# The school is in India: a number typed without a country code is Indian.
+DEFAULT_COUNTRY_CODE = "91"
 
-    '+91 98765-43210' and '+919876543210' must not create two accounts.
+
+def normalize_phone(raw: str) -> str:
+    """One spelling per number, so the same number always hits the same row.
+
+    '+91 98765-43210', '9876543210', '09876543210' and '919876543210' are all
+    '+919876543210'. That matters twice over: two spellings must not create two
+    accounts, and a parent's login (always +91..., from the phone field) must
+    equal the number the teacher typed on the register form, or the parent is
+    never mapped to their child.
     """
-    return _PHONE_CLEANUP_RE.sub("", raw.strip())
+    phone = _PHONE_CLEANUP_RE.sub("", raw.strip())
+    if phone.startswith("00"):
+        phone = "+" + phone[2:]
+    if not phone or phone.startswith("+") or not phone.isdigit():
+        return phone
+
+    if len(phone) == 10:
+        return f"+{DEFAULT_COUNTRY_CODE}{phone}"
+    if len(phone) == 11 and phone.startswith("0"):
+        return f"+{DEFAULT_COUNTRY_CODE}{phone[1:]}"
+    if len(phone) == 12 and phone.startswith(DEFAULT_COUNTRY_CODE):
+        return f"+{phone}"
+    return phone
 
 
 def looks_like_email(value: str) -> bool:
@@ -70,6 +90,7 @@ class UserOut(BaseModel):
     needs_contact_details: bool
 
     is_phone_verified: bool
+    is_email_verified: bool
     created_at: datetime
 
 
@@ -313,6 +334,15 @@ class StudentCreateRequest(StudentDetails):
     class_id: str = Field(min_length=1, max_length=16)
 
 
+class StudentUpdateRequest(StudentDetails):
+    """A pupil's details, edited. Every field, as on registration.
+
+    No class_id: this edits the record, it does not move the pupil. A
+    class_id in the body is ignored rather than refused, so the app can send
+    the same shape it registers with.
+    """
+
+
 class ArchivedStudent(StudentDetails):
     """A student read out of a class file, on its way back in with a restore.
 
@@ -330,8 +360,9 @@ class StudentOut(StudentDetails):
     student_id: str
     class_id: str
 
-    # Alphabetical position in the class, from the class_roster view. It moves
-    # when a student with an earlier name joins or one before them leaves.
+    # Position in the class by registration order, from the class_roster view.
+    # A new pupil gets the next number; it moves only when one before them
+    # leaves.
     roll_number: int
     created_at: datetime
 

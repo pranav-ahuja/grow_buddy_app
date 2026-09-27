@@ -15,6 +15,9 @@ the same request.
 """
 
 import helpers
+from app import approvals
+from app.database import get_db
+from app.models import REQUEST_STUDENT_ADD, SchoolClass, Teacher, User
 from helpers import (
     ACCOUNT_TYPE_PRINCIPAL,
     ACCOUNT_TYPE_STUDENT,
@@ -57,6 +60,32 @@ def pending(client, token: str) -> list[dict]:
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def raise_legacy_student_add(client, teacher_token: str, class_id: str) -> None:
+    """Files a `student_add` request the way the API did before 2026-09-27.
+
+    The endpoint no longer raises one, but rows raised before then are still
+    in real queues, and the tests about the queue's shape need one to look at.
+    """
+    teacher_id = helpers.teacher_id_of(client, teacher_token)
+    db = next(client.app.dependency_overrides[get_db]())
+    try:
+        teacher = db.get(Teacher, teacher_id)
+        school_class = db.get(SchoolClass, class_id)
+        pupil = a_pupil(class_id)
+        approvals.raise_request(
+            db,
+            teacher=teacher,
+            asked_by=db.get(User, teacher.user_id),
+            kind=REQUEST_STUDENT_ADD,
+            summary=approvals.student_add_summary(pupil["name"], school_class.name),
+            payload=pupil,
+            class_id=class_id,
+        )
+        db.commit()
+    finally:
+        db.close()
 
 
 def notices(client, token: str) -> dict:
@@ -254,29 +283,36 @@ def test_approving_a_delete_for_a_class_already_gone_says_so(client):
 # --- Students -----------------------------------------------------------------
 
 
-def test_a_teachers_registration_waits_and_then_lands(client):
+def test_a_teachers_registration_lands_at_once_and_only_tells_the_principal(
+    client,
+):
+    """Registration left the approval list on 2026-09-27; removal did not."""
     s = staff(client)
     class_id = helpers.make_class(
         client, s["asha"], "Nursery", principal=s["head"]
     )
 
-    asked = client.post(
+    added = client.post(
         STUDENTS, json=a_pupil(class_id), headers=auth(s["asha"])
     )
 
-    assert asked.status_code == 202, asked.text
-    assert asked.json()["request"]["summary"] == 'registration of Diya in "Nursery"'
-    assert client.get(STUDENTS, headers=auth(s["asha"])).json() == []
-
-    [request] = pending(client, s["head"])
-    granted = client.post(
-        f"{REQUESTS}/{request['id']}/approve", headers=auth(s["head"])
-    )
-
-    assert granted.status_code == 200, granted.text
-    assert granted.json()["student"]["name"] == "Diya"
+    assert added.status_code == 201, added.text
+    body = added.json()
+    assert body["status"] == "done"
+    assert body["request"] is None
+    assert body["student"]["name"] == "Diya"
     # With a roll number, like any other registration.
-    assert granted.json()["student"]["roll_number"] == 1
+    assert body["student"]["roll_number"] == 1
+    assert len(client.get(STUDENTS, headers=auth(s["asha"])).json()) == 1
+
+    # Nothing to decide, so nothing in the queue...
+    assert pending(client, s["head"]) == []
+    # ...but the principal is told, with no request to act on.
+    items = notices(client, s["head"])["notifications"]
+    [notice] = [n for n in items if "registered Diya" in n["message"]]
+    assert notice["message"] == 'Asha Rao registered Diya in "Nursery"'
+    assert notice["source"] == "Asha Rao"
+    assert notice["request_id"] is None
 
 
 def test_a_teachers_removal_waits_and_then_takes_the_pupil(client):
@@ -404,7 +440,9 @@ def test_the_payload_is_never_exposed(client):
     class_id = helpers.make_class(
         client, s["asha"], "Nursery", principal=s["head"]
     )
-    client.post(STUDENTS, json=a_pupil(class_id), headers=auth(s["asha"]))
+    # Registration no longer queues, so the request is raised directly — the
+    # shape a request made before 2026-09-27 still has.
+    raise_legacy_student_add(client, s["asha"], class_id)
 
     [request] = pending(client, s["head"])
 

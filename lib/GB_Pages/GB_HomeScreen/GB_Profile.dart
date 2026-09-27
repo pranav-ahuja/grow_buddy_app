@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_EditProfileSheet.dart';
 import 'package:grow_buddy_app/GB_Services/GB_AuthApi.dart';
 import 'package:grow_buddy_app/GB_Services/GB_ProfilePhotoStore.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
@@ -20,12 +21,19 @@ enum _PhotoAction { camera, gallery, remove }
 /// Who is signed in on this device — the screen behind the "Profile" item in
 /// the home bar's profile menu.
 ///
-/// The details are read-only; the picture is not. Everything shown here comes
-/// from [gCurrentUser], which `GB_SessionGate` refreshes from `GET /auth/me`
-/// on every launch, so the screen makes no request of its own and works
-/// offline from the cached user. Editing the text would mean `PATCH /auth/me`,
-/// which `GB_CompleteProfile` already owns; when this screen grows an "Edit"
-/// action it should call that rather than grow a second form.
+/// Everything shown here comes from [gCurrentUser], which `GB_SessionGate`
+/// refreshes from `GET /auth/me` on every launch, so the screen draws itself
+/// with no request of its own and works offline from the cached user.
+///
+/// **Edit** opens [GB_EditProfileSheet], the only thing here that talks to the
+/// server. The plan recorded in docs/PROJECT.md was for it to reuse
+/// `GB_CompleteProfile` instead; that screen turned out to be the wrong shape
+/// for an edit — it hides a contact that is already set, and its back arrow
+/// signs out — and the sheet says why in full.
+///
+/// **The role is shown but not editable**, unlike the two rows above it. It is
+/// what the whole app branches on rather than a detail its owner corrects, so
+/// it is not among the fields the sheet offers.
 ///
 /// The user id is deliberately **not** shown. It is a database key — the app
 /// needs it, the teacher does not, and putting `U_000001` on a profile invites
@@ -171,6 +179,19 @@ class _GB_ProfileState extends State<GB_Profile> {
     }
   }
 
+  /// Opens the edit sheet and redraws this screen with what came back.
+  ///
+  /// The sheet has already written the new user to [gCurrentUser] and to secure
+  /// storage by the time it returns, so this only has to rebuild — and it
+  /// returns null when nothing was saved, which is the common case of a sheet
+  /// swiped away.
+  Future<void> _editDetails(GB_User user) async {
+    final GB_User? updated = await GB_EditProfileSheet.show(context, user);
+    if (updated == null || !mounted) return;
+    setState(() {});
+    gShowSnack(context, "Your details are updated");
+  }
+
   @override
   Widget build(BuildContext context) {
     final GB_User? user = gCurrentUser;
@@ -186,6 +207,23 @@ class _GB_ProfileState extends State<GB_Profile> {
           appBarText: "Profile",
           appBarFontWeight: FontWeight.w500,
         ),
+        actions: [
+          // Absent rather than disabled when there is no session: there is
+          // nothing to edit, and a greyed-out button would invite a tap that
+          // could only fail.
+          if (user != null)
+            TextButton(
+              onPressed: () => _editDetails(user),
+              child: const Text(
+                "Edit",
+                style: TextStyle(
+                  fontSize: kEventSubtitleTextSize,
+                  fontWeight: FontWeight.w500,
+                  color: kHomeAccentColor,
+                ),
+              ),
+            ),
+        ],
       ),
       // Null only if the session was cleared while this screen was open —
       // gSignOut replaces the whole stack, so in practice it is unreachable.

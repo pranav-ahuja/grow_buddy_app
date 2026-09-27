@@ -138,6 +138,38 @@ class GB_OtpRequestResult {
   }
 }
 
+/// A code sent to an email or number the user is moving their account to.
+///
+/// Extends [GB_OtpRequestResult] rather than repeating it, so `displayMessage`
+/// — and with it the [kDebugMode] guard that keeps a dev code off a real user's
+/// screen — has one definition for both flows.
+class GB_ContactChangeResult extends GB_OtpRequestResult {
+  /// "phone" or "email": which contact this code will change when redeemed.
+  final String channel;
+
+  /// The value the server stored and sent the code to, normalised — so the
+  /// code screen can name the number the server has, not the one the field
+  /// happens to still hold.
+  final String value;
+
+  GB_ContactChangeResult({
+    required this.channel,
+    required this.value,
+    required super.message,
+    required super.expiresInSeconds,
+    super.debugOtp,
+  });
+
+  factory GB_ContactChangeResult.fromJson(Map<String, dynamic> json) {
+    return GB_ContactChangeResult(
+      channel: json["channel"] as String? ?? kContactChannelPhone,
+      value: json["value"] as String? ?? "",
+      message: json["message"] as String? ?? "Verification code sent",
+      expiresInSeconds: json["expires_in_seconds"] as int? ?? 300,
+      debugOtp: json["debug_otp"] as String?,
+    );
+  }
+}
 class GB_AuthApi {
   /// [identifier] is either an email address or a phone number — the backend
   /// works out which, so the single sign-up field maps straight through.
@@ -224,6 +256,49 @@ class GB_AuthApi {
 
   static Future<GB_User> me(String token) async {
     final json = await GB_ApiClient.getJson(kMeUrl, token: token);
+    return GB_User.fromJson(json);
+  }
+
+  /// Asks the server to send a code to an email or number the signed-in user
+  /// wants to move to.
+  ///
+  /// **Nothing has changed on the account when this returns.** The value is
+  /// held server-side until [verifyContactChange] redeems the code, so the
+  /// user still signs in with their old contact until then — which is why the
+  /// UI must not show the new one as though it were theirs yet.
+  ///
+  /// Throws [GB_ApiException] on 400 (it is already your number), 409 (someone
+  /// else has it) or 429 (inside the resend cooldown); the message is written
+  /// for the user.
+  static Future<GB_ContactChangeResult> requestContactChange({
+    required String token,
+    required String channel,
+    required String value,
+  }) async {
+    final json = await GB_ApiClient.postJson(
+      kContactChangeRequestUrl,
+      {"channel": channel, "value": value},
+      token: token,
+    );
+    return GB_ContactChangeResult.fromJson(json);
+  }
+
+  /// Redeems the code and returns the user as they now are — with the new
+  /// contact on the account, and `is_phone_verified` true for a number.
+  ///
+  /// The new value is deliberately **not** a parameter: the server commits the
+  /// value the code was issued for, so there is nothing here that could
+  /// disagree with what was confirmed.
+  static Future<GB_User> verifyContactChange({
+    required String token,
+    required String channel,
+    required String otp,
+  }) async {
+    final json = await GB_ApiClient.postJson(
+      kContactChangeVerifyUrl,
+      {"channel": channel, "otp": otp},
+      token: token,
+    );
     return GB_User.fromJson(json);
   }
 }

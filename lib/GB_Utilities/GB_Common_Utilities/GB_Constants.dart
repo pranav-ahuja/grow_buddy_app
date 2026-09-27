@@ -109,12 +109,21 @@ const double kFeatureRowGap = 24.0;
 
 const double kStudentCardWidth = 92.0;
 const double kStudentCardHeight = 120.0;
-const double kStudentAvatarRadius = 30.0;
+const double kStudentAvatarRadius = 28.0;
 const double kStudentNameTextSize = 16.0;
 /// The caption under a name on a student card. The design drew an age there;
 /// the card shows the student id instead, at the same size.
 const double kStudentIdTextSize = 12.0;
 const double kStudentRowGap = 16.0;
+
+/// Between the photo and the name on a student card.
+const double kStudentCardGap = 4.0;
+/// The card is a fixed height with three lines under the photo, so their
+/// line height is pinned instead of left to the font, and the text stops
+/// growing a little above the default size. Together these keep the card
+/// from overflowing on a phone set to a larger font.
+const double kStudentCardLineHeight = 1.2;
+const double kStudentCardMaxTextScale = 1.1;
 
 /// The faint top-to-bottom wash behind the horizontal card rows.
 const Color kClassRowWashColor = Color(0xffF1F1F1);
@@ -300,6 +309,18 @@ const String kOtpVerifyUrl = '$kApiPrefix/auth/otp/verify';
 const String kGoogleLoginUrl = '$kApiPrefix/auth/google';
 // GET returns the current user; PATCH completes their profile.
 const String kMeUrl = '$kApiPrefix/auth/me';
+
+// Changing a contact you already have, which takes a code to the new address
+// or number first. Separate from PATCH /auth/me on purpose: that route fills in
+// a *missing* email or phone, while these two prove a replacement before it
+// becomes the thing you log in with.
+const String kContactChangeRequestUrl = '$kMeUrl/contact/request';
+const String kContactChangeVerifyUrl = '$kMeUrl/contact/verify';
+
+// What the two contact channels are called on the wire. Sent as a string the
+// server CHECKs, so a typo here is a 422 and not a silently wrong column.
+const String kContactChannelPhone = 'phone';
+const String kContactChannelEmail = 'email';
 
 // A teacher's classes and students. Everything under these is scoped to the
 // signed-in user by the bearer token, which is what makes the same account show

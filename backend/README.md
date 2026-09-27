@@ -131,6 +131,10 @@ PostgreSQL it is an ordinary ALTER.
 | `0003` | Adds `subjects` and `attendance`, plus the `S` row in `id_counters`. Hand-written for the `lower(name)` index and that counter row. |
 | `0004` | Expands `teachers` (DOB, qualification, address, relationship status, Aadhaar, emergency contact, `updated_at`) and adds `teacher_subjects` and `teacher_experience`. Rewritten after autogenerate produced two bugs — see below. |
 | `0005` | Adds `student_guardians` — a parent's account linked to their child. Nothing backfilled: there is no safe guess about which account belongs to which child. |
+| `0006` | Makes `classes.teacher_id` nullable and adds `class_teachers`, `change_requests` and `notifications` — the principal-as-admin approval queue. Drops and rebuilds the `class_roster` view and `uq_classes_teacher_name` by hand. |
+| `0007` | Adds `contact_change_codes`, so a new email or phone waits for its code before reaching `users`. |
+| `0008` | Renames `student_guardians` to `student_mapping` (and `relation` to `relationship`, plus the PostgreSQL constraint names), adds `source`, and adds `users.is_email_verified`. Backfills automatic mappings for parent accounts with a verified phone on a pupil's record. Batch mode on SQLite reflects neighbouring tables, hence harmless "Skipped unsupported reflection of expression-based index" warnings in the test run. |
+| `0009` | Rewrites every stored phone number (`students` mother/father/guardian, `users`) to `+91XXXXXXXXXX`, maps the parents that then match, and rebuilds `class_roster` so roll numbers follow registration order instead of the alphabet. Downgrade restores the alphabetical view; the numbers stay normalised. |
 
 ## Endpoints
 

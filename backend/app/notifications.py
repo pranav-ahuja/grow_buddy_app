@@ -166,6 +166,39 @@ def student_registered_message(
     return f'{teacher_name} registered {student_name} in "{class_name}"'
 
 
+def student_mobile_changed_message(
+    *, editor_name: str, student_name: str, changes: list[tuple[str, str]]
+) -> str:
+    """What a parent sees when staff change a number on their child's record.
+
+    [changes] pairs a label ("mother's mobile") with the new number, or "" for
+    one that was cleared. The numbers are written out: a parent who did not
+    ask for the change needs to see what it is now to know whether it is
+    right.
+    """
+    described = "; ".join(
+        f"{label} is now {new}" if new else f"{label} was removed"
+        for label, new in changes
+    )
+    return f"{editor_name} updated {student_name}'s contact numbers: {described}"
+
+
+def parent_contact_changed_message(
+    *,
+    parent_name: str,
+    relationship: str,
+    student_name: str,
+    what: str,
+    new_value: str,
+) -> str:
+    """What a class teacher sees when a parent changes their own number or
+    email. The record was updated with it; nothing to approve."""
+    return (
+        f"{parent_name} ({relationship.lower()} of {student_name}) changed "
+        f"their {what} to {new_value}. {student_name}'s record has been updated."
+    )
+
+
 def request_approved_message(*, decided_by: str, summary: str) -> str:
     return f"{decided_by} approved your request for {summary}"
 

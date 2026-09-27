@@ -1,24 +1,18 @@
-"""Linking a parent's account to their child.
+"""Staff-made links between a parent's account and their child.
 
-The app is for parents, so a "student" account is a parent operating on a
-child's behalf — and nothing joins the two until somebody says so. This is
-where that happens.
+**Most links are no longer made here.** Since 0008 a parent account whose
+verified phone or email is the mother's or father's on a pupil's record is
+mapped automatically — see [app.student_mapping]. This router is for the
+exceptions: a grandparent, a parent whose number is not on the record, or
+seeing and removing who is linked.
 
 **Staff only, on purpose.** A parent cannot claim a child by asserting they are
-the parent. Getting this wrong is the worst failure in the whole app: it hands
-a stranger a child's address, attendance and contact numbers. The teacher who
-registered the pupil, or the principal, makes the link — the register-student
-form already collected the parents' names and numbers, so the school is the
-party that actually knows.
+the parent; the automatic path only trusts a contact a code has reached. The
+teacher who registered the pupil, or the principal, makes a manual link — and a
+manual link is never removed by the automatic one.
 
 The account is named by **email or phone**, not by `U_` id, because that is
-what staff have in front of them. When the identifier matches a contact already
-on the pupil's record — `mother_mobile`, `father_email` and so on — the
-response says so, which is the closest thing to a check the server can offer
-without guessing.
-
-A self-service claim ("my number is on that child's record, link me") is
-deliberately absent. It needs an approval step, which is phase 5.
+what staff have in front of them.
 """
 
 from fastapi import APIRouter, HTTPException, Response, status
@@ -27,7 +21,13 @@ from sqlalchemy.orm import Session
 
 from app.access import readable_student, require_staff
 from app.deps import CurrentUser, DbSession
-from app.models import ROLE_STUDENT, Student, StudentGuardian, User
+from app.models import (
+    MAPPING_SOURCE_STAFF,
+    ROLE_STUDENT,
+    Student,
+    StudentMapping,
+    User,
+)
 from app.schemas import (
     GuardianLinkRequest,
     GuardianOut,
@@ -41,10 +41,10 @@ router = APIRouter(prefix="/students", tags=["guardians"])
 def _guardians_out(db: Session, student: Student) -> list[GuardianOut]:
     """Who may see this pupil, named rather than listed as user ids."""
     rows = db.execute(
-        select(StudentGuardian, User)
-        .join(User, User.user_id == StudentGuardian.user_id)
-        .where(StudentGuardian.student_id == student.student_id)
-        .order_by(StudentGuardian.created_at)
+        select(StudentMapping, User)
+        .join(User, User.user_id == StudentMapping.user_id)
+        .where(StudentMapping.student_id == student.student_id)
+        .order_by(StudentMapping.created_at)
     ).all()
 
     return [
@@ -54,7 +54,7 @@ def _guardians_out(db: Session, student: Student) -> list[GuardianOut]:
             full_name=account.full_name,
             email=account.email,
             phone=account.phone,
-            relation=link.relation,
+            relation=link.relationship,
             matches_registered_contact=_matches_registered_contact(
                 student, account
             ),
@@ -156,19 +156,23 @@ def link_guardian(
             ),
         )
 
-    existing = db.get(StudentGuardian, (account.user_id, student.student_id))
+    existing = db.get(StudentMapping, (account.user_id, student.student_id))
     if existing is not None:
         # Idempotent: the relation is updated and the link stays. Two taps on a
-        # slow connection should not read as a failure.
-        existing.relation = payload.relation
+        # slow connection should not read as a failure. An automatic mapping
+        # becomes a staff one, so a later change of number cannot remove it.
+        existing.relationship = payload.relation
+        existing.source = MAPPING_SOURCE_STAFF
+        existing.linked_by_user_id = user.user_id
         db.commit()
         return _guardians_out(db, student)
 
     db.add(
-        StudentGuardian(
+        StudentMapping(
             user_id=account.user_id,
             student_id=student.student_id,
-            relation=payload.relation,
+            relationship=payload.relation,
+            source=MAPPING_SOURCE_STAFF,
             linked_by_user_id=user.user_id,
         )
     )
@@ -195,7 +199,7 @@ def unlink_guardian(
     require_staff(db, user, action="unlink a parent from a pupil")
     student = readable_student(db, user, student_id)
 
-    link = db.get(StudentGuardian, (guardian_user_id, student.student_id))
+    link = db.get(StudentMapping, (guardian_user_id, student.student_id))
     if link is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, detail="That account is not linked"

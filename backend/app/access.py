@@ -23,7 +23,7 @@ from app.models import (
     ClassTeacher,
     SchoolClass,
     Student,
-    StudentGuardian,
+    StudentMapping,
     Teacher,
     User,
 )
@@ -49,8 +49,8 @@ def guardian_student_ids(db: Session, user: User) -> set[str]:
     """
     return set(
         db.scalars(
-            select(StudentGuardian.student_id).where(
-                StudentGuardian.user_id == user.user_id
+            select(StudentMapping.student_id).where(
+                StudentMapping.user_id == user.user_id
             )
         )
     )

@@ -368,8 +368,9 @@ class _GB_HomeDashboardState extends State<GB_HomeDashboard>
 
     final GB_Student? created = result.student;
     if (created == null) {
-      // A teacher's registration is a request; no pupil exists yet, so there
-      // is no id or roll number to announce.
+      // Only reached against a server from before 2026-09-27, when a
+      // teacher's registration was a request: no pupil yet, so no id or roll
+      // number to announce. Registration goes straight in for every role now.
       gShowSnack(context, result.detail);
       unawaited(GB_NotificationStore.loadQuietly());
       return;
@@ -384,13 +385,13 @@ class _GB_HomeDashboardState extends State<GB_HomeDashboard>
             .firstOrNull ??
         "their class";
 
-    // The id and roll number are named here because registration is the only
-    // place they are announced — everywhere else the user has to already know
-    // which student card to go and look at.
+    // The roll number is named here because registration is the only place it
+    // is announced — everywhere else the user has to already know which
+    // student card to go and look at.
     gShowSnack(
       context,
-      "${created.name} added to $className as ${created.studentId}"
-      "${created.rollNumber == null ? "" : ", roll no. ${created.rollNumber}"}",
+      "${created.name} added to $className"
+      "${created.rollNumber == null ? "" : " as roll no. ${created.rollNumber}"}",
     );
   }
 

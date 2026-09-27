@@ -2,9 +2,10 @@
 
 **Who may do what, since 2026-09-20.** The principal is the school's admin and
 does all four outright — create a class, delete one, register a pupil, remove
-one. A teacher may start all four too, but what they produce is a request for
-the principal to answer; see [app.approvals] for why nothing else changes
-until it is answered.
+one. A teacher registers a pupil outright too (since 2026-09-27; the principal
+is notified). The other three a teacher may start, but what they produce is a
+request for the principal to answer; see [app.approvals] for why nothing else
+changes until it is answered.
 
 The endpoints do not fork by role at the top and run two implementations. Each
 one decides who is asking, then either performs the change or records the ask,
@@ -22,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import approvals, school
+from app import approvals, notifications, school
 from app.access import (
     guardian_class_ids,
     guardian_student_ids,
@@ -44,12 +45,12 @@ from app.models import (
     REQUEST_CLASS_CREATE,
     REQUEST_CLASS_DELETE,
     REQUEST_PENDING,
-    REQUEST_STUDENT_ADD,
     REQUEST_STUDENT_REMOVE,
     ChangeRequest,
     ClassTeacher,
     SchoolClass,
     Student,
+    StudentMapping,
     Teacher,
     User,
 )
@@ -65,6 +66,7 @@ from app.schemas import (
     RosterEntry,
     StudentCreateRequest,
     StudentOut,
+    StudentUpdateRequest,
 )
 
 router = APIRouter(tags=["classes"])
@@ -620,59 +622,145 @@ def create_student(
     payload: StudentCreateRequest,
     user: CurrentUser,
     db: DbSession,
-    response: Response,
 ) -> ActionResult:
-    """Registers a pupil, or asks to.
+    """Registers a pupil. Outright, for the principal **and** for a teacher.
 
     **Staff only**, and explicitly so. Once a linked parent could reach their
     child's class through `readable_class`, this route let them register
     pupils into it — registration is not a parent's act, and a class anyone
     can add children to is not a register.
 
-    The principal registers into any class in the school. A teacher may ask
-    for any class they take; the class is resolved through their own scope, so
-    a class id from elsewhere reads 404 rather than telling them it exists.
+    The principal registers into any class in the school. A teacher registers
+    into any class they take; the class is resolved through their own scope,
+    so a class id from elsewhere reads 404 rather than telling them it exists.
+
+    **A teacher's registration stopped being a request on 2026-09-27.** Adding
+    a pupil destroys nothing and is undone by removing them, which still
+    needs the principal's approval — so the approval step was guarding the
+    cheap direction and making a teacher wait a day to take a register for a
+    new child. The principal is told instead: a notice with no `request_id`,
+    so it carries no Approve or Reject, because there is nothing to decide.
+
+    `REQUEST_STUDENT_ADD` stays a valid kind. Requests raised before the
+    change are still in the queue and can still be answered.
     """
     require_staff(db, user, action="register a student")
     school_class = readable_class(db, user, payload.class_id)
 
-    if is_principal(user):
-        student = school.create_student(
-            db, school_class=school_class, payload=payload
-        )
-        school.commit_or_409(
-            db,
-            f"{payload.name} is already registered in {school_class.name} "
-            "with the same date of birth, address, and parents' details",
-        )
-        created = school.students_out(
-            db, Student.student_id == student.student_id
-        )[0]
-        return ActionResult(
-            status="done",
-            detail=f"{created.name} added to {school_class.name}",
-            student=created,
-        )
+    # Resolved before anything is written: an account that is staff but has no
+    # teacher row is refused here rather than after the pupil exists.
+    principal = is_principal(user)
+    if not principal:
+        require_teacher(db, user)
 
-    teacher = require_teacher(db, user)
-    # Checked now as well as at approval, so a teacher is not left waiting on
-    # a request that was never going to succeed.
-    school.reject_duplicate_child(db, school_class, payload)
-
-    request = approvals.raise_request(
-        db,
-        teacher=teacher,
-        asked_by=user,
-        kind=REQUEST_STUDENT_ADD,
-        summary=approvals.student_add_summary(payload.name, school_class.name),
-        payload=payload.model_dump(mode="json"),
-        class_id=school_class.class_id,
+    student = school.create_student(
+        db, school_class=school_class, payload=payload
     )
-    db.commit()
-    db.refresh(request)
 
-    response.status_code = status.HTTP_202_ACCEPTED
-    return _pending_result(request)
+    if not principal:
+        # In the same transaction as the pupil, so a registration that fails
+        # to save cannot leave a notice behind saying it happened.
+        notifications.notify_principals(
+            db,
+            message=notifications.student_registered_message(
+                teacher_name=user.full_name,
+                student_name=payload.name,
+                class_name=school_class.name,
+            ),
+            source=user.full_name,
+        )
+
+    school.commit_or_409(
+        db,
+        f"{payload.name} is already registered in {school_class.name} "
+        "with the same date of birth, address, and parents' details",
+    )
+    created = school.students_out(
+        db, Student.student_id == student.student_id
+    )[0]
+    return ActionResult(
+        status="done",
+        detail=f"{created.name} added to {school_class.name}",
+        student=created,
+    )
+
+
+_MOBILE_FIELDS = (
+    ("mother_mobile", "mother's mobile"),
+    ("father_mobile", "father's mobile"),
+    ("guardian_mobile", "guardian's mobile"),
+)
+
+
+@router.patch("/students/{student_id}", response_model=ActionResult)
+def update_student(
+    student_id: str,
+    payload: StudentUpdateRequest,
+    user: CurrentUser,
+    db: DbSession,
+) -> ActionResult:
+    """Edits a pupil's details. Outright, for a teacher of the class and for
+    the principal.
+
+    No approval: an edit destroys nothing that another edit cannot put back.
+    Removing the pupil is the act that waits for the principal, and it stays
+    on `DELETE`.
+
+    **A changed mobile number notifies the pupil's linked parent accounts**,
+    because a number on a child's record is how the school reaches the family,
+    and the family should not find out it changed by missing a call. Raised in
+    the same transaction as the edit, so a save that fails leaves no notice.
+    """
+    require_staff(db, user, action="edit a pupil's details")
+    student = readable_student(db, user, student_id)
+    school_class = db.get(SchoolClass, student.class_id)
+
+    changes = [
+        (label, getattr(payload, field))
+        for field, label in _MOBILE_FIELDS
+        if getattr(payload, field) != getattr(student, field)
+    ]
+
+    def mapped_accounts() -> set[str]:
+        return set(
+            db.scalars(
+                select(StudentMapping.user_id).where(
+                    StudentMapping.student_id == student_id
+                )
+            )
+        )
+
+    # Read before saving: the save re-maps the pupil by number, and the parent
+    # whose number was replaced is exactly who most needs telling.
+    mapped_before = mapped_accounts()
+
+    school.update_student(
+        db, student=student, school_class=school_class, payload=payload
+    )
+
+    if changes:
+        guardian_ids = sorted(mapped_before | mapped_accounts())
+        message = notifications.student_mobile_changed_message(
+            editor_name=user.full_name,
+            student_name=payload.name,
+            changes=changes,
+        )
+        for guardian_id in guardian_ids:
+            notifications.notify_user(
+                db, user_id=guardian_id, message=message, source=user.full_name
+            )
+
+    school.commit_or_409(
+        db,
+        f"{payload.name} is already registered in {school_class.name} "
+        "with the same date of birth, address, and parents' details",
+    )
+    updated = school.students_out(db, Student.student_id == student_id)[0]
+    return ActionResult(
+        status="done",
+        detail=f"{updated.name}'s details saved",
+        student=updated,
+    )
 
 
 @router.delete("/students/{student_id}", response_model=ActionResult)

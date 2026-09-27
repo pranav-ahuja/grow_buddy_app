@@ -466,11 +466,11 @@ class _GB_StudentDashboardState extends State<GB_StudentDashboard>
     );
   }
 
-  /// What a parent sees before the school has linked their account.
+  /// What a parent sees before any child is mapped to their account.
   ///
-  /// The link can only be made by staff — a parent cannot claim a child — so
-  /// this explains rather than offering an action they do not have. Telling
-  /// them who to ask is the only useful thing the screen can do.
+  /// Children appear on their own once the number or email this account has
+  /// proved is the mother's or father's on the pupil's record, so this says
+  /// what makes that happen rather than who to ask.
   Widget _buildNotLinkedYet() {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 40.0),
@@ -489,9 +489,11 @@ class _GB_StudentDashboardState extends State<GB_StudentDashboard>
           const SizedBox(height: 8.0),
           const GB_H2HeadingText(
             inputText:
-                "Your account isn't linked to a child yet. Ask your child's "
-                "teacher or the principal to connect it, then pull down to "
-                "refresh.",
+                "No child found for your account yet. Your children appear "
+                "here when the mobile number you log in with is the one your "
+                "child's teacher registered for you. If you signed up with a "
+                "password, log in once with your mobile number and the code "
+                "we send. Then pull down to refresh.",
             inputTextAlign: TextAlign.center,
           ),
         ],

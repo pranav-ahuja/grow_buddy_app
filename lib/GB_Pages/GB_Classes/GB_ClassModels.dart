@@ -314,10 +314,10 @@ class GB_Student {
   /// created the class they are going back into.
   final String? classId;
 
-  /// The student's position in their class, alphabetically — 1 for the first
-  /// name. Worked out by the server on every read, so it shifts when a student
-  /// with an earlier name joins or one before them leaves. Null before the
-  /// server has seen the student.
+  /// The student's position in their class by registration order — 1 for the
+  /// first registered. Worked out by the server on every read: a new student
+  /// gets the next number, and it shifts only when one before them leaves.
+  /// Null before the server has seen the student.
   final int? rollNumber;
 
   /// A photo the teacher picked, as a file path on the device. Null when they
