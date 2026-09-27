@@ -69,8 +69,13 @@ jobs:
       # Infos are not fatal: the project uses a GB_ prefix and Snake_Case by
       # choice, which the default lints flag ~215 times. Errors and warnings
       # still fail the build, which is the part worth gating on.
+      #
+      # Scoped to the code that goes into the app. testcases/ is the unit and
+      # widget suite: it is not part of the .app, and this workflow already
+      # ignores changes to it (paths-ignore above), so errors there must not
+      # block an iOS build.
       - name: Analyze
-        run: flutter analyze --no-fatal-infos
+        run: flutter analyze --no-fatal-infos lib integration_test
 
       # kApiBaseUrl is a String.fromEnvironment, so the backend address is a
       # build flag rather than a source edit. Set the GB_API_BASE_URL repository
