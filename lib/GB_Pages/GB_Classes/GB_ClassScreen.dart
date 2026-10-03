@@ -3,10 +3,13 @@ import 'dart:async';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_AddTeacherSheet.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_Attendance/GB_MarkAttendanceScreen.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassDialogs.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassFeatureConfig.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassWidgets.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_RegisterStudentSheet.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentListSheet.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentStore.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_NotificationStore.dart';
 import 'package:grow_buddy_app/GB_Services/GB_ClassApi.dart';
@@ -110,6 +113,22 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
       context,
       "${created.name} added to ${_classInfo.name}"
       "${created.rollNumber == null ? "" : " as roll no. ${created.rollNumber}"}",
+    );
+  }
+
+  /// "See All" beside "Students list": the whole class in one searchable
+  /// sheet, since the row itself only shows as many as the screen is wide.
+  ///
+  /// The sheet hands the taps straight back here, so a pupil opened or edited
+  /// from the list goes through the same code as one opened from a card.
+  void _openStudentList() {
+    GB_StudentListSheet.show(
+      context,
+      classInfo: _classInfo,
+      onAddStudent: _canRegisterStudents ? _registerStudent : null,
+      onStudentTap: (GB_Student student) =>
+          gShowSnack(context, "Student profiles are coming soon"),
+      onStudentLongPress: _canRegisterStudents ? _openStudentMenu : null,
     );
   }
 
@@ -284,14 +303,20 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
               const SizedBox(height: 4.0),
               GB_ClassCardRow(
                 gap: kFeatureRowGap,
-                children: GB_ClassFeature.all
+                children: GB_ClassFeatureConfig.featuresFor(_classInfo.id)
                     .map(
                       (GB_ClassFeature feature) => GB_FeatureCard(
                         feature: feature,
-                        onTap: () => gShowSnack(
-                          context,
-                          "${feature.label} is coming soon",
-                        ),
+                        // On the id, not the label: renaming a tile must not
+                        // quietly unhook the screen behind it.
+                        onTap: () =>
+                            feature.id == GB_ClassFeature.attendanceId
+                                ? GB_MarkAttendanceScreen.open(
+                                    context, _classInfo)
+                                : gShowSnack(
+                                    context,
+                                    "${feature.label} is coming soon",
+                                  ),
                       ),
                     )
                     .toList(),
@@ -303,8 +328,7 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
                 ),
                 child: GB_ClassSectionHeader(
                   title: "Students list",
-                  onSeeAll: () =>
-                      gShowSnack(context, "The full student list is coming soon"),
+                  onSeeAll: _openStudentList,
                 ),
               ),
               const SizedBox(height: 4.0),

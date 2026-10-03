@@ -173,12 +173,19 @@ class GB_ClassArchive {
     }
   }
 
-  /// One sheet per tab on the class screen.
+  /// One sheet per feature in the catalogue.
   ///
   /// They carry no rows because the app stores nothing for those tabs yet —
-  /// assignments, grades, and the rest are placeholder screens. The sheets are
-  /// written anyway so the archive mirrors the class the teacher sees, and so
-  /// there is somewhere obvious for that data to go the day it exists.
+  /// homework, grades, and the rest are placeholder screens. The sheets are
+  /// written anyway so there is somewhere obvious for that data to go the day
+  /// it exists.
+  ///
+  /// Deliberately the whole of [GB_ClassFeature.all] and not just the features
+  /// the class currently shows: an archive is a backup, and a class restored
+  /// after someone switched a feature on would otherwise come back missing a
+  /// sheet it is about to need. The sheet names are decorative — [decode]
+  /// reads only the class and students sheets — so a renamed feature does not
+  /// break an archive written before the rename.
   static void _writeFeatureSheets(Excel workbook) {
     for (final GB_ClassFeature feature in GB_ClassFeature.all) {
       final Sheet sheet = workbook[feature.label];

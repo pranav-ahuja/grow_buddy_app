@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_AddClassSheet.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_Attendance/GB_AttendanceHome.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassArchive.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassArchiveFile.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassDialogs.dart';
@@ -21,12 +22,25 @@ import 'package:grow_buddy_app/GB_Services/GB_ClassApi.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_AuthFlow.dart';
 import 'package:grow_buddy_app/GB_Utilities/GB_Common_Utilities/GB_Constants.dart';
 
+/// Which screen a bottom-nav tab is.
+enum GB_DashboardTabKind { home, attendance, fee, message }
+
 /// One bottom-nav destination.
 class GB_DashboardTab {
-  const GB_DashboardTab({required this.label, required this.icon});
+  const GB_DashboardTab({
+    required this.kind,
+    required this.label,
+    required this.icon,
+  });
 
+  final GB_DashboardTabKind kind;
   final String label;
   final IconData icon;
+
+  /// Tabs with a screen of their own. The rest still announce themselves.
+  bool get isBuilt =>
+      kind == GB_DashboardTabKind.home ||
+      kind == GB_DashboardTabKind.attendance;
 }
 
 /// What a role may do on the home dashboard.
@@ -96,9 +110,21 @@ class GB_DashboardPermissions {
     canDeleteClass: true,
     showsClassOwner: false,
     tabs: [
-      GB_DashboardTab(label: "Home", icon: Icons.home),
-      GB_DashboardTab(label: "Attendance", icon: Icons.supervisor_account),
-      GB_DashboardTab(label: "Message", icon: Icons.question_answer),
+      GB_DashboardTab(
+        kind: GB_DashboardTabKind.home,
+        label: "Home",
+        icon: Icons.home,
+      ),
+      GB_DashboardTab(
+        kind: GB_DashboardTabKind.attendance,
+        label: "Attendance",
+        icon: Icons.supervisor_account,
+      ),
+      GB_DashboardTab(
+        kind: GB_DashboardTabKind.message,
+        label: "Message",
+        icon: Icons.question_answer,
+      ),
     ],
   );
 
@@ -111,10 +137,26 @@ class GB_DashboardPermissions {
     canDeleteClass: true,
     showsClassOwner: true,
     tabs: [
-      GB_DashboardTab(label: "Home", icon: Icons.home),
-      GB_DashboardTab(label: "Attendance", icon: Icons.supervisor_account),
-      GB_DashboardTab(label: "Fee", icon: Icons.local_library),
-      GB_DashboardTab(label: "Message", icon: Icons.question_answer),
+      GB_DashboardTab(
+        kind: GB_DashboardTabKind.home,
+        label: "Home",
+        icon: Icons.home,
+      ),
+      GB_DashboardTab(
+        kind: GB_DashboardTabKind.attendance,
+        label: "Attendance",
+        icon: Icons.supervisor_account,
+      ),
+      GB_DashboardTab(
+        kind: GB_DashboardTabKind.fee,
+        label: "Fee",
+        icon: Icons.local_library,
+      ),
+      GB_DashboardTab(
+        kind: GB_DashboardTabKind.message,
+        label: "Message",
+        icon: Icons.question_answer,
+      ),
     ],
   );
 }
@@ -142,7 +184,7 @@ class GB_HomeDashboard extends StatefulWidget {
 
 class _GB_HomeDashboardState extends State<GB_HomeDashboard>
     with WidgetsBindingObserver {
-  /// Which bottom-nav tab is selected. Only Home has a screen so far; the
+  /// Which bottom-nav tab is selected. Home and Attendance have screens; the
   /// others announce themselves and leave the index where it was.
   int _selectedTab = 0;
 
@@ -396,7 +438,7 @@ class _GB_HomeDashboardState extends State<GB_HomeDashboard>
   }
 
   void _onTabTapped(int index) {
-    if (index == 0) {
+    if (_can.tabs[index].isBuilt) {
       setState(() => _selectedTab = index);
       return;
     }
@@ -406,8 +448,29 @@ class _GB_HomeDashboardState extends State<GB_HomeDashboard>
     gShowSnack(context, "${_can.tabs[index].label} is coming soon");
   }
 
+  GB_DashboardTabKind get _currentTab => _can.tabs[_selectedTab].kind;
+
   @override
   Widget build(BuildContext context) {
+    if (_currentTab == GB_DashboardTabKind.attendance) {
+      return PopScope(
+        // System back returns to Home, as the app bar's arrow does, rather
+        // than leaving the app from a tab.
+        canPop: false,
+        onPopInvokedWithResult: (bool didPop, Object? result) {
+          if (!didPop) setState(() => _selectedTab = 0);
+        },
+        child: Scaffold(
+          backgroundColor: kPrimaryColor2,
+          appBar: GB_AttendanceAppBar(
+            onBack: () => setState(() => _selectedTab = 0),
+          ),
+          body: const SafeArea(child: GB_AttendanceHome()),
+          bottomNavigationBar: _buildBottomNavigationBar(),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: kPrimaryColor2,
       appBar: const GB_HomeAppBar(),

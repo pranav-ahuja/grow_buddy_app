@@ -185,7 +185,10 @@ The Tailscale URL is the one to use, because it covers both cases — when the
 phone and laptop are on the same Wi-Fi, Tailscale negotiates a direct
 peer-to-peer connection over that LAN rather than routing out to the internet,
 so it is not slower than the plain LAN address. A build with no `--dart-define`
-still falls back to `192.168.0.157` and still works on Wi-Fi.
+still gets the Tailscale URL, because that is the committed default as of
+2026-10-03 — so the usual case needs no flag at all. Override it only for a
+device that is not on the tailnet (an emulator, someone else's phone):
+`--dart-define=GB_API_BASE_URL=http://192.168.0.157:8080`.
 
 ## What Survives a Reboot
 

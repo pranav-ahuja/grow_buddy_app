@@ -89,6 +89,27 @@ const double kHomeNavUnselectedTextSize = 12.0;
 const String kClassAvatarImage = "assets/images/hs_classes.jpeg";
 const String kEventImage = "assets/images/hs_events.png";
 
+//Attendance
+// From the Figma frame `470-18042`: the Attendance tab, the class-picker
+// sheet, and one class's register.
+const Color kAttendancePresentColor = Color(0xff0BA397);
+const Color kAttendanceAbsentColor = Color(0xffF03C23);
+const Color kAttendanceOutlineColor = Color(0xff636363);
+const Color kAttendanceCardBorderColor = Color(0x33000000);
+const Color kAttendanceCardShadowColor = Color(0xff8C8C8C);
+const Color kAttendanceTableDividerColor = Color(0xff8F8F8F);
+const Color kAttendanceScrollbarColor = Color(0xff757575);
+const Color kAttendanceSheetBorderColor = Color(0x99636363);
+const Color kAttendanceSheetGrabberColor = Color(0x6679747E);
+// The design blurs the screen behind the sheet under a 45% white wash. A
+// modal bottom sheet's barrier cannot blur, so only the wash is drawn.
+const Color kAttendanceSheetBarrierColor = Color(0x73FFFFFF);
+const double kAttendanceCardHeight = 220.0;
+const double kAttendanceIllustrationSize = 144.0;
+const double kAttendanceSheetMaxHeight = 576.0;
+const double kAttendanceTableRowHeight = 40.0;
+const String kAttendanceIllustration = "assets/images/attendance_calendar.png";
+
 //Class Screen
 // From the Figma frame `360-45584`. The header panel carries the class's own
 // tint and rounds off at the bottom; the feature and student rows are white
@@ -124,6 +145,18 @@ const double kStudentCardGap = 4.0;
 /// from overflowing on a phone set to a larger font.
 const double kStudentCardLineHeight = 1.2;
 const double kStudentCardMaxTextScale = 1.1;
+
+/// The "See All" sheet's list rows. The design pitches them 77pt apart, with a
+/// 48pt photo and a 24pt gap before the name, which is larger than the card's
+/// because the row has the whole sheet to spend.
+const double kStudentListRowHeight = 77.0;
+const double kStudentListAvatarRadius = 24.0;
+const double kStudentListAvatarGap = 24.0;
+const double kStudentListNameTextSize = 20.0;
+
+/// Behind a pupil's photo, so a slow or missing image leaves the design's
+/// tinted circle rather than a hole.
+const Color kStudentAvatarTintColor = Color(0xffD8E7E5);
 
 /// The faint top-to-bottom wash behind the horizontal card rows.
 const Color kClassRowWashColor = Color(0xffF1F1F1);
@@ -283,22 +316,36 @@ const String kGoogleIosClientId = "";
 //   Physical device       -> http://<your-computer-LAN-IP>:8080
 //   Anywhere, any network -> https://<machine>.<tailnet>.ts.net   (Tailscale)
 //
-// The default below is this machine's LAN address, which only reaches the
-// backend while the phone is on the same Wi-Fi. Rather than editing this line
-// for every network, override it at build time:
+// The default below is **this machine's Tailscale name**, which reaches the
+// backend from any network — Wi-Fi, mobile data, anywhere — so no flag is
+// needed for the usual case. `tool/gb_tailscale_serve.ps1` is what publishes
+// it, and it has to be running for this address to answer.
 //
-//   flutter run --dart-define=GB_API_BASE_URL=https://<machine>.<tailnet>.ts.net
+// It is the default rather than the LAN address for three reasons:
+//   - A LAN IP is only right while the phone is on that Wi-Fi, and the one
+//     thing it does when it is wrong is fail silently as "can't reach the
+//     server" from somewhere else.
+//   - DHCP moves a LAN IP; the tailnet name never changes.
+//   - It is real HTTPS with a Let's Encrypt certificate, so it works in a
+//     release build. Cleartext http:// needs an entry in
+//     android/app/src/debug/res/xml/network_security_config.xml, which is
+//     src/debug only — that path can never ship.
 //
-// `tool/gb_tailscale_serve.ps1` starts the Tailscale proxy and prints that
-// command with the real hostname filled in. The Tailscale form carries no port
-// (serve listens on 443) and needs no network_security_config entry, because it
-// is real HTTPS with a Let's Encrypt certificate rather than cleartext.
+// The cost: the device has to be signed into the same tailnet. Anything that
+// is not — a colleague's phone on the office Wi-Fi, an emulator with no
+// Tailscale — overrides it at build time:
+//
+//   flutter run --dart-define=GB_API_BASE_URL=http://192.168.0.157:8080
+//   flutter run --dart-define=GB_API_BASE_URL=http://10.0.2.2:8080   (emulator)
+//
+// A --dart-define is compiled in: changing it needs a full stop and re-run,
+// because hot reload and hot restart both keep the old value.
 //
 // `String.fromEnvironment` is a const constructor, so everything below stays a
 // compile-time constant either way.
 const String kApiBaseUrl = String.fromEnvironment(
   'GB_API_BASE_URL',
-  defaultValue: 'http://192.168.0.157:8080',
+  defaultValue: 'https://laptop-9iu37vee.tailee091f.ts.net',
 );
 const String kApiPrefix = '$kApiBaseUrl/api/v1';
 

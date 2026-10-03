@@ -133,12 +133,14 @@ lib/
 │       ├── GB_ClassStore.dart             this device's copy of the teacher's classes
 │       ├── GB_StudentStore.dart           …and of their students
 │       ├── GB_ClassModels.dart            GB_ClassInfo, GB_Student, GB_StudentContact, GB_ClassPalette, GB_ClassFeature
+│       ├── GB_ClassFeatureConfig.dart     which features each class shows
 │       ├── GB_ClassWidgets.dart           feature card, student card, colour swatches
 │       ├── GB_ClassDialogs.dart           edit-class and confirm-delete dialogs
 │       ├── GB_AddClassSheet.dart          add a class, or restore one from a class file
 │       ├── GB_AddTeacherSheet.dart        the principal's multi-pick "who teaches this class"
 │       ├── GB_RegisterStudentSheet.dart   the register-student form
 │       ├── GB_StudentFormFields.dart      that form's field widgets
+│       ├── GB_StudentListSheet.dart       "See All" — the class's pupils, searchable
 │       ├── GB_ClassArchive.dart           pure encode/decode of the .xlsx class file
 │       └── GB_ClassArchiveFile.dart       the platform Save/Open dialogs for it
 ├── GB_Services/
@@ -287,6 +289,32 @@ new but is still incomplete. `isNewUser` only picks the wording.
   stores on sign-out.
 - **Classes**: add (with a 9-slot colour picker), rename, recolour, delete, and
   open. Names are unique per teacher, case-insensitively, checked on both sides.
+- **Class features are per class, and off by default** (2026-10-03). The six
+  tiles were drawn for every class alike, which is wrong — a nursery sets no
+  homework and a senior class does not want a fee tile between its lessons.
+  `GB_ClassFeatureConfig` is now the one place that says what a class shows.
+  - **Enabled today: Homework and Attendance, on every class**, new ones
+    included. The other four — Grade Book, Resources, Class Schedule, Fee
+    Payment — are **switched off, not deleted**: still in
+    `GB_ClassFeature.all`, still drawable, waiting on a real teacher to ask.
+    Turning one back on is a line of config.
+  - **"Assignment" is now "Homework"** (the label only — the asset is still
+    `assignments.png`).
+  - **Features carry a stable `id`.** Nothing branches on a label any more,
+    because this rename is exactly what breaks that: the class screen keys
+    Attendance off `GB_ClassFeature.attendanceId`, not the word "Attendance".
+  - `defaultEnabled` applies to any class with no entry in `perClass`; a
+    `perClass` entry **replaces** the default rather than adding to it, so one
+    line states a class's whole set. A debug `assert` rejects an id that
+    matches no feature, because a typo would otherwise just hide a tile.
+  - **The cost of keeping it in Dart**: changing a class needs a rebuild, and
+    `perClass` is keyed by server ids (`CL_000003`). Every caller goes through
+    `featuresFor`, so moving the set onto the `classes` row later — most
+    likely when a principal should set it themselves — touches that one file.
+  - The `.xlsx` archive still writes a sheet for **all six**, not just the
+    enabled ones: it is a backup, and the sheet names are decorative because
+    `decode` reads only the class and students sheets. An archive written
+    before the rename still restores.
 - **Class files**: deleting a class first writes an `.xlsx` archive through the
   system Save dialog — and only deletes if that file was actually saved. Adding
   a class can restore one back, students and their original `ST_` ids included,
@@ -300,6 +328,71 @@ new but is still incomplete. `isNewUser` only picks the wording.
   The class screen has a floating **"Add student"** button for staff
   (2026-09-27), opening the form with that class preselected; the principal
   sees it stacked under "Add teacher".
+- **"See All"** (2026-10-03, Figma frame `2037-8582`): the students row on the
+  class screen only shows as many pupils as the screen is wide, so the link
+  beside "Students list" opens `GB_StudentListSheet` — the whole class in one
+  sheet, searchable by name. The sheet is built from `GB_StudentStore`, so a
+  pupil edited or removed while it is open redraws without reopening it.
+  - **The head of the sheet is the search box.** The design puts the
+    placeholder in the title's position and style, with the rule beneath
+    standing in for an underline, so an empty field reads as the sheet's
+    heading. A clear button appears only once something is typed, which is
+    what keeps that heading intact. Matching is on the name, case-folded, as
+    a substring.
+  - **A row is the photo, the name, and the roll number** under it. The
+    design's row carries a name only; a register cannot afford that, because
+    the roll number is what a teacher calls a pupil by and the one thing that
+    tells two children of the same name apart.
+  - **Tapping and holding do what they do on a student card** — the sheet
+    hands both back to the class screen, so a pupil edited from the list goes
+    through the same code as one edited from a card. The sheet closes first,
+    so the form is never stacked on a sheet that is dismissing behind it.
+  - **"Add Student" shows only for staff**, on the same rule as the class
+    screen's floating button; a parent's account gets the list without it.
+  - Differences from the design: the frame is the **Add Teacher** picker, and
+    was used for its layout — its own labels are a mix of "Search Teacher's
+    Name" and "Add Student". The sheet's background is washed, not blurred,
+    for the reason the attendance sheet's is.
+- **Attendance** (2026-10-03, Figma frame `470-18042`): the UI lives in
+  `lib/GB_Pages/GB_Classes/GB_Attendance/`, the API calls in
+  `GB_Services/GB_AttendanceApi.dart`.
+  - **The Attendance tab** (both dashboards) shows a "Mark Attendance" card
+    and every class with today's counts, `T:20 P:18 A:02`. A class whose
+    register could not be read shows `P:-- A:--` rather than zeros.
+  - **"Mark Attendance"** opens a sheet to pick the class, and **the sheet
+    comes back after each register** — with the counts that save just
+    changed — because a teacher takes one class after another; dismissing it
+    ends the round. Tapping a class on the tab, or the class screen's
+    Attendance card, goes straight to that one register and back.
+  - **The register** opens on today with whatever was already saved, so the
+    same screen takes and corrects a register; tapping the date reviews an
+    earlier day (up to a year back). A box cycles empty → present (teal) →
+    absent (red), and ⋮ offers "Mark everyone present". It submits in one
+    request and only once every pupil is marked: a half-marked day reads
+    later as "the rest were absent". Leaving with unsaved marks asks first.
+  - **Every day starts over with nothing marked** (2026-10-03). A register is
+    one class on one day: `attendance` is keyed by date, `GET /attendance`
+    filters `date ==`, and a day nobody has marked returns `[]`, which the
+    screen draws as empty boxes. That part was always right. What was not is
+    that `_date` is read once when the screen opens, so an app left open
+    overnight stayed on yesterday and the next box tapped would have filed
+    today's mark against yesterday's row — silently, because the screen still
+    looked correct. Both attendance screens now reload on resume
+    (`WidgetsBindingObserver`, the pattern the dashboard already uses), and
+    the register rolls its date forward.
+    - Only a screen **following today** rolls forward. A teacher who went
+      looking for an earlier day stays on it; picking today again re-arms it.
+    - **The clock never discards unsaved marks.** If the day turns while
+      marks are pending, the register says so and names the day they belong
+      to, leaving submit-or-discard to the teacher. Rolling the date under
+      them would re-file work already done against the wrong day.
+  - **The principal reads only**, as the server enforces: "View Attendance",
+    no tappable boxes, no submit.
+  - Differences from the design: no ⋮ on the tab (it had no action to
+    offer); the sheet's background is washed, not blurred (a modal sheet's
+    barrier cannot blur); names are centred across the space left by the
+    roll and status columns rather than in a fixed 121pt column, so longer
+    names fit.
 - **Editing a pupil** (2026-09-27): holding a student card offers **Edit** or
   **Cancel**. Edit opens the register sheet in edit mode — prefilled, class
   locked, **Delete** beside **Save**. Delete lives only there, so removing a
@@ -417,8 +510,8 @@ a real portal. Delivered one phase at a time, each reviewed before the next.
 
 **Phase 3 — done (2026-09-18), backend only.** `subjects` and `attendance`.
 
-Migration `0003`. **No UI yet** — the class screen's Attendance card still says
-"coming soon"; wiring it is a later phase. What exists is the data and the API.
+Migration `0003`. Attendance has had a UI since 2026-10-03 (see "Attendance"
+under What Works Today); subjects still have none.
 
 - **`subjects`** — `S_000001`, uuid, name, unique on `lower(name)` so there is
   one "Mathematics" per school. Note the prefix is `S` while a student is `ST`.
@@ -562,7 +655,7 @@ since phase 2.
 - 26 tests in `test_student_portal.py`, 11 Flutter tests, plus a PostgreSQL
   probe.
 
-**Still owed, on top of phases 3, 4 and 6:** the **UI** for attendance,
+**Still owed, on top of phases 3, 4 and 6:** the **UI** for
 subjects, the teacher sign-up step and profile form, and the staff-side screen
 for linking a parent to a pupil — that endpoint exists and nothing calls it
 yet.
@@ -694,10 +787,11 @@ decision.
   anything.
 - **Events** — the carousel on both the dashboard and the class screen is
   hard-coded placeholder data. `_events` in each file is the seam.
-- **The six class features** — Assignment, Grade Book, Resources, Class
-  Schedule, Attendance, Fee Payment are cards that say "coming soon".
-- **Bottom-nav tabs** — Attendance, Fee, and Message announce themselves and
-  leave the tab where it was. Only Home has a screen. The notification tab is
+- **Five of the six class features** — Assignment, Grade Book, Resources,
+  Class Schedule and Fee Payment are cards that say "coming soon".
+  Attendance opens the class's register.
+- **Bottom-nav tabs** — Fee and Message announce themselves and leave the tab
+  where it was. Home and Attendance have screens. The notification tab is
   **not** among them: it is behind the bell in the app bar, because three of
   these four are still unbuilt and a fifth destination would have reshuffled a
   row nothing else is ready to change.
@@ -721,7 +815,10 @@ decision.
   turned out to be the wrong shape and a sheet was written instead. What is
   still not editable from the app is the **role** — deliberately — and the
   teacher profile fields from phase 4.
-- **"See All"** on the class screen's student list.
+- **A student's profile page.** "See All" is built (2026-10-03, above), but
+  tapping a pupil — from the list or from a card — still answers "Student
+  profiles are coming soon". There is no screen behind it yet; editing one is
+  reached by holding the row instead.
 - **iOS Google Sign-In** — `kGoogleIosClientId` is still empty.
 - **SMS, and now email** — `request_otp()` logs the code instead of sending
   it, and `request_contact_change()` does the same for both channels. There is
@@ -888,11 +985,16 @@ Things worth knowing before changing this:
   `GB_Constants.dart` reaches every existing class with no data migration.
 
 ### Notes that bite
-- `kApiBaseUrl` differs per target. The committed **default** is a LAN IP
-  (`http://192.168.0.157:8080`); Android emulator wants `10.0.2.2`, desktop/iOS
-  sim `127.0.0.1`. It is a `String.fromEnvironment`, so prefer
-  `--dart-define=GB_API_BASE_URL=...` over editing the constant — and note that
-  a `--dart-define` change does **not** hot-reload, it needs a full restart.
+- `kApiBaseUrl` differs per target. The committed **default is the Tailscale
+  URL** (`https://laptop-9iu37vee.tailee091f.ts.net`), changed 2026-10-03, so a
+  plain `flutter run` works on Wi-Fi and on mobile data without a flag — at the
+  cost of needing `tool/gb_tailscale_serve.ps1` running and the device on the
+  tailnet. The LAN IP (`http://192.168.0.157:8080`), `10.0.2.2` for an Android
+  emulator and `127.0.0.1` for desktop/iOS sim are all still reachable; they
+  are now the overrides rather than the default. It is a `String.fromEnvironment`,
+  so prefer `--dart-define=GB_API_BASE_URL=...` over editing the constant — and
+  note that a `--dart-define` change does **not** hot-reload, it needs a full
+  restart.
 - **Tailscale is how the app reaches the backend off the LAN.** Every other
   address above dies the moment the phone leaves the Wi-Fi.
   `tool/gb_tailscale_serve.ps1` runs `tailscale serve`, which fronts uvicorn

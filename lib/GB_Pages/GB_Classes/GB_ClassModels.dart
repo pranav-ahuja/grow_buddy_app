@@ -210,40 +210,74 @@ class GB_ClassPalette {
 /// [iconPath] is an asset rather than an [IconData]: the design uses the
 /// project's illustrated emoji-style art, which no icon font can reproduce.
 class GB_ClassFeature {
+  /// A stable key for the config, and for the rare bit of code that has to
+  /// single a feature out.
+  ///
+  /// Nothing branches on [label], because labels are what users read and users
+  /// change their minds: this one was "Assignment" until 2026-10-03. An id is
+  /// never shown, so it never has to move.
+  final String id;
+
   final String label;
   final String iconPath;
 
-  const GB_ClassFeature({required this.label, required this.iconPath});
+  const GB_ClassFeature({
+    required this.id,
+    required this.label,
+    required this.iconPath,
+  });
 
-  /// The six features the design lays out, in its order.
+  /// The two the app has real screens for. Named so that no call site has to
+  /// spell an id as a bare string.
+  static const String homeworkId = "homework";
+  static const String attendanceId = "attendance";
+
+  /// Every feature the class screen knows how to draw, in the design's order.
+  ///
+  /// This is the **catalogue**, not what any one class shows —
+  /// `GB_ClassFeatureConfig` decides that. A feature stays listed here even
+  /// while it is switched off for every class: switching one back on should be
+  /// a line of config, not a rewrite, and the day a real teacher asks for
+  /// Resources back is the day that has to be cheap.
   static const List<GB_ClassFeature> all = [
     GB_ClassFeature(
-      label: "Assignment",
+      id: homeworkId,
+      label: "Homework",
+      // The asset is still named for the old label; only the label moved.
       iconPath: "assets/images/features_of_class/assignments.png",
     ),
     GB_ClassFeature(
+      id: "grade_book",
       label: "Grade Book",
       iconPath: "assets/images/features_of_class/grade_books.png",
     ),
     GB_ClassFeature(
+      id: "resources",
       label: "Resources",
       iconPath: "assets/images/features_of_class/resources.png",
     ),
     GB_ClassFeature(
+      id: "class_schedule",
       label: "Class Schedule",
       iconPath: "assets/images/features_of_class/class_sch.png",
     ),
     // Spelt correctly here even though the design and the asset filename both
     // read "Attendence"; the label is what users read.
     GB_ClassFeature(
+      id: attendanceId,
       label: "Attendance",
       iconPath: "assets/images/features_of_class/Attendence.png",
     ),
     GB_ClassFeature(
+      id: "fee_payment",
       label: "Fee Payment",
       iconPath: "assets/images/features_of_class/fee_payment.png",
     ),
   ];
+
+  /// Every id in the catalogue — what the config is checked against.
+  static Set<String> get allIds =>
+      all.map((GB_ClassFeature feature) => feature.id).toSet();
 }
 
 /// A person to reach about a student — a parent or a guardian.

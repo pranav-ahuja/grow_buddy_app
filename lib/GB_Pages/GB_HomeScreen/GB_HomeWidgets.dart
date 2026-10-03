@@ -154,6 +154,7 @@ class GB_ClassTile extends StatelessWidget {
     this.subtitle,
     this.onTap,
     this.onDelete,
+    this.trailing,
   });
 
   final GB_ClassInfo classInfo;
@@ -168,6 +169,10 @@ class GB_ClassTile extends StatelessWidget {
   /// Shown as a trailing bin icon when set. Null draws no button at all, so a
   /// tile can be listed somewhere deleting is not on offer.
   final VoidCallback? onDelete;
+
+  /// Drawn at the end of the row when there is no bin — the attendance lists'
+  /// chevron.
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -245,7 +250,9 @@ class GB_ClassTile extends StatelessWidget {
                     // design's card.
                     visualDensity: VisualDensity.compact,
                     tooltip: "Delete ${classInfo.name}",
-                  ),
+                  )
+                else if (trailing != null)
+                  trailing!,
               ],
             ),
           ),

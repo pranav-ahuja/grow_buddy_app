@@ -298,8 +298,11 @@ single place to change:
 | iOS simulator / Windows desktop | `http://127.0.0.1:8080` |
 | Physical phone on the same Wi-Fi | `http://<this-machine-LAN-IP>:8080` |
 
-This machine's LAN IP is currently `192.168.0.157`, which is what is committed.
-It can change when the router reassigns leases — recheck with `ipconfig`.
+What is committed as the default is **not** any of these: it is the Tailscale
+URL `https://laptop-9iu37vee.tailee091f.ts.net` (changed 2026-10-03), which
+reaches the backend from any network. This machine's LAN IP is currently
+`192.168.0.157` and can change when the router reassigns leases — recheck with
+`ipconfig` if you override back to it. See docs/Tailscale_porting.md.
 
 The committed value is a compile-time default. Override it without touching
 the file:
