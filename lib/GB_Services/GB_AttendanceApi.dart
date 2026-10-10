@@ -19,6 +19,33 @@ enum GB_AttendanceStatus {
 /// day are absent from the map, not marked absent.
 typedef GB_Register = Map<String, GB_AttendanceStatus>;
 
+/// One pupil's running totals, as `GET /attendance/summary` computes them.
+///
+/// [percentPresent] is null — not zero — for a pupil with no marks yet. The
+/// server draws that distinction deliberately: "0% attendance" is a claim
+/// about a child, and "not recorded" is the truth.
+class GB_AttendanceSummary {
+  const GB_AttendanceSummary({
+    required this.daysRecorded,
+    required this.present,
+    required this.percentPresent,
+  });
+
+  final int daysRecorded;
+  final int present;
+  final double? percentPresent;
+
+  bool get hasMarks => daysRecorded > 0 && percentPresent != null;
+
+  factory GB_AttendanceSummary.fromJson(Map<String, dynamic> json) {
+    return GB_AttendanceSummary(
+      daysRecorded: (json["days_recorded"] as num?)?.toInt() ?? 0,
+      present: (json["present"] as num?)?.toInt() ?? 0,
+      percentPresent: (json["percent_present"] as num?)?.toDouble(),
+    );
+  }
+}
+
 /// Taking the register and reading it back — `POST` and `GET /attendance`.
 ///
 /// Marking is a teacher's act; the server refuses the principal, who reads.
@@ -63,6 +90,23 @@ class GB_AttendanceApi {
     // The route answers with a list, which the client wraps as {"data": ...}.
     final List<dynamic> items = (json["data"] as List<dynamic>?) ?? const [];
     return _registerFrom(items.cast<Map<String, dynamic>>());
+  }
+
+  /// One pupil's totals for the profile screen's attendance card.
+  ///
+  /// Computed by the server on every read rather than stored, so a day a
+  /// teacher corrects is reflected here without anything else being updated.
+  /// The route reads for a guardian as well as for staff, so a parent opening
+  /// their own child's profile gets the same card.
+  static Future<GB_AttendanceSummary> studentSummary({
+    required String token,
+    required String studentId,
+  }) async {
+    final Map<String, dynamic> json = await GB_ApiClient.getJson(
+      "$kAttendanceUrl/summary?student_id=$studentId",
+      token: token,
+    );
+    return GB_AttendanceSummary.fromJson(json);
   }
 
   static GB_Register _registerFrom(List<Map<String, dynamic>> items) {

@@ -161,6 +161,32 @@ const Color kStudentAvatarTintColor = Color(0xffD8E7E5);
 /// The faint top-to-bottom wash behind the horizontal card rows.
 const Color kClassRowWashColor = Color(0xffF1F1F1);
 
+//Student Profile
+// From the Figma frame `2047-7898` (claude_ui/ui_student_1.png): the pupil's
+// photo, an attendance card, then a Personal / Academics pill pair above a
+// flat list of fields.
+//
+// The green here is the design's own and is not [kAttendancePresentColor] —
+// that one is the teal the mark-attendance table uses for a "P". Reusing it
+// would tint this bar away from the design for no gain, so the percentage
+// keeps its own colour.
+const Color kStudentProfileAttendanceColor = Color(0xff22A04A);
+const Color kStudentProfileAttendanceTrackColor = Color(0xffE4E4E4);
+
+/// The selected pill's wash and the unselected one's outline.
+const Color kStudentProfileTabFillColor = Color(0xffE3F3E8);
+const Color kStudentProfileTabBorderColor = Color(0xffA9D2B8);
+
+/// A field's rule. Lighter than the card borders: it separates rows inside
+/// one list rather than closing a box around them.
+const Color kStudentProfileFieldRuleColor = Color(0x33000000);
+
+const double kStudentProfileAvatarRadius = 44.0;
+const double kStudentProfileTabHeight = 36.0;
+const double kStudentProfileTabWidth = 118.0;
+const double kStudentProfileFieldLabelSize = 12.0;
+const double kStudentProfileFieldValueSize = 15.0;
+
 /// Shared by the class cards, feature cards, and student cards.
 const Color kClassCardShadowColor = Color(0x40E0DBDB);
 

@@ -127,8 +127,11 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
       context,
       classInfo: _classInfo,
       onAddStudent: _canRegisterStudents ? _registerStudent : null,
-      onStudentTap: (GB_Student student) =>
-          GB_StudentProfileScreen.open(context, student),
+      onStudentTap: (GB_Student student) => GB_StudentProfileScreen.open(
+        context,
+        student,
+        onMenu: _canRegisterStudents ? _openStudentMenu : null,
+      ),
       onStudentLongPress: _canRegisterStudents ? _openStudentMenu : null,
     );
   }
@@ -552,8 +555,11 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
               .map(
                 (GB_Student student) => GB_StudentCard(
                   student: student,
-                  onTap: () =>
-                      GB_StudentProfileScreen.open(context, student),
+                  onTap: () => GB_StudentProfileScreen.open(
+                    context,
+                    student,
+                    onMenu: _canRegisterStudents ? _openStudentMenu : null,
+                  ),
                   // A long press rather than a visible button on every card:
                   // editing is occasional, and deleting — reached only from
                   // inside the edit form — is rare and irreversible.

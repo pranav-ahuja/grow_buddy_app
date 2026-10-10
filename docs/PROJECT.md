@@ -141,7 +141,7 @@ lib/
 │       ├── GB_RegisterStudentSheet.dart   the register-student form
 │       ├── GB_StudentFormFields.dart      that form's field widgets
 │       ├── GB_StudentListSheet.dart       "See All" — the class's pupils, searchable
-│       ├── GB_StudentProfileScreen.dart   one pupil's personal details
+│       ├── GB_StudentProfileScreen.dart   one pupil: attendance + personal details
 │       ├── GB_ClassArchive.dart           pure encode/decode of the .xlsx class file
 │       └── GB_ClassArchiveFile.dart       the platform Save/Open dialogs for it
 ├── GB_Services/
@@ -354,35 +354,55 @@ new but is still incomplete. `isNewUser` only picks the wording.
     was used for its layout — its own labels are a mix of "Search Teacher's
     Name" and "Add Student". The sheet's background is washed, not blurred,
     for the reason the attendance sheet's is.
-- **A pupil's profile** (2026-10-11, Figma frame `2047-7898`):
-  `GB_StudentProfileScreen`, opened by tapping a student card on the class
-  screen or a row in the "See All" sheet. Both routes call the same
-  `open`, replacing the "Student profiles are coming soon" snack that stood in
-  for it.
-  - **Personal details only.** The academics half of the design is deliberately
-    absent: the tables behind it are still being designed, and a section wired
-    to nothing would only have to be rewritten once they exist.
-  - **Eight fields**, as asked for: name, age, date of birth, gender, and the
-    mother's and father's names and mobile numbers. The address, the parents'
-    email addresses and the whole guardian block are left out — the
-    register-student form stays the place to see or change all of it.
+- **A pupil's profile** (2026-10-11, Figma frame `2047-7898`, supplied as
+  `claude_ui/ui_student_1.png`): `GB_StudentProfileScreen`, opened by tapping a
+  student card on the class screen or a row in the "See All" sheet. Both routes
+  call the same `open`, replacing the "Student profiles are coming soon" snack
+  that stood in for it.
+  - **The frame, top to bottom:** an app bar titled with the pupil's own name
+    and carrying the overflow menu, the photo, an attendance card, then a
+    Personal / Academics pill pair above a flat list of fields. The fields are
+    separated by rules rather than boxed in a card — that is what tells this
+    list apart from the account profile's bordered details card.
+  - **The overflow is the student menu** the class screen already opens on a
+    long press, passed in as a callback and gated on the same staff rule. A
+    parent's account gets no button, and the title keeps its position.
+  - **Personal only.** Academics is a pill that draws an empty state: the
+    tables behind it are still being designed, and a section wired to nothing
+    would only have to be rewritten once they exist.
+  - **Eight fields, and deliberately not the frame's five.** The frame lists
+    mother's name, father's name, guardian's name, address and date of birth.
+    What was asked for is name, age, both parents' names *and* mobile numbers,
+    date of birth and gender — so the guardian block and the address are out,
+    and the numbers, the age and the gender are in. The register-student form
+    stays the one place that shows everything `students` holds.
   - **Age is derived, not stored.** `GB_Student.ageYears()` works it out from
     the date of birth, so it is right on every birthday with nothing having to
-    rewrite a row. Both are shown: the design asks for the age, and a teacher
+    rewrite a row. Both are shown: the age was asked for, and a teacher
     checking a record wants the date it came from.
-  - **No new endpoint.** Every field is already in `GB_StudentStore` from the
-    roster read, so opening a profile costs no request and works offline once
+  - **The attendance card is real, on `GET /attendance/summary`** — the one
+    request this screen makes, and the only part of it that can fail. Four
+    states: loading, failed (the message sits in the caption rather than
+    interrupting the screen), recorded, and a pupil with no marks at all. The
+    last is **not** drawn as 0%: the server returns null for the percentage
+    precisely so "no register taken yet" cannot be read as a child who never
+    turned up.
+  - **Nothing else costs a request.** Every field is already in
+    `GB_StudentStore` from the roster read, so the profile works offline once
     the class is loaded. The screen listens to the store, so a pupil edited
-    behind it is redrawn; a pupil *removed* while it is open keeps drawing the
-    details that were on screen rather than blanking out.
-  - **An empty value reads "Not added yet"** in the muted italic the account
-    profile uses. The parents' details are optional on the register form, and a
-    blank row would look like a rendering fault.
-  - Caveat: the Figma frame could not be read when this was built (the MCP
-    server would not authorise), so the layout follows the account profile's
-    details card and the attendance screen's hand-built app bar rather than the
-    frame itself. **The field list and behaviour are right; the visual
-    treatment still needs checking against the design.**
+    from the overflow is redrawn; one *removed* while it is open keeps drawing
+    the details that were on screen rather than blanking out.
+  - **A blank value leaves the value line empty**, as the frame's "Guardian's
+    Name" row does, rather than writing "Not added yet" into it. The row keeps
+    its height so the rules stay evenly spaced.
+  - Differences from the frame: it writes the date **22/08/2020**, which this
+    screen follows — note that is *not* the "12 Apr 2021" the
+    register-student form uses, which spells the month out so it cannot be
+    read the American way round. If the two should agree,
+    `GB_StudentProfileScreen._formatDate` is the line to change. The frame's
+    own title is the placeholder "Student_name".
+  - Not yet checked on a device: the screen analyses clean but has not been
+    rendered against the frame.
 - **Attendance** (2026-10-03, Figma frame `470-18042`): the UI lives in
   `lib/GB_Pages/GB_Classes/GB_Attendance/`, the API calls in
   `GB_Services/GB_AttendanceApi.dart`.
