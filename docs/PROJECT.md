@@ -141,6 +141,7 @@ lib/
 │       ├── GB_RegisterStudentSheet.dart   the register-student form
 │       ├── GB_StudentFormFields.dart      that form's field widgets
 │       ├── GB_StudentListSheet.dart       "See All" — the class's pupils, searchable
+│       ├── GB_StudentProfileScreen.dart   one pupil's personal details
 │       ├── GB_ClassArchive.dart           pure encode/decode of the .xlsx class file
 │       └── GB_ClassArchiveFile.dart       the platform Save/Open dialogs for it
 ├── GB_Services/
@@ -353,6 +354,35 @@ new but is still incomplete. `isNewUser` only picks the wording.
     was used for its layout — its own labels are a mix of "Search Teacher's
     Name" and "Add Student". The sheet's background is washed, not blurred,
     for the reason the attendance sheet's is.
+- **A pupil's profile** (2026-10-11, Figma frame `2047-7898`):
+  `GB_StudentProfileScreen`, opened by tapping a student card on the class
+  screen or a row in the "See All" sheet. Both routes call the same
+  `open`, replacing the "Student profiles are coming soon" snack that stood in
+  for it.
+  - **Personal details only.** The academics half of the design is deliberately
+    absent: the tables behind it are still being designed, and a section wired
+    to nothing would only have to be rewritten once they exist.
+  - **Eight fields**, as asked for: name, age, date of birth, gender, and the
+    mother's and father's names and mobile numbers. The address, the parents'
+    email addresses and the whole guardian block are left out — the
+    register-student form stays the place to see or change all of it.
+  - **Age is derived, not stored.** `GB_Student.ageYears()` works it out from
+    the date of birth, so it is right on every birthday with nothing having to
+    rewrite a row. Both are shown: the design asks for the age, and a teacher
+    checking a record wants the date it came from.
+  - **No new endpoint.** Every field is already in `GB_StudentStore` from the
+    roster read, so opening a profile costs no request and works offline once
+    the class is loaded. The screen listens to the store, so a pupil edited
+    behind it is redrawn; a pupil *removed* while it is open keeps drawing the
+    details that were on screen rather than blanking out.
+  - **An empty value reads "Not added yet"** in the muted italic the account
+    profile uses. The parents' details are optional on the register form, and a
+    blank row would look like a rendering fault.
+  - Caveat: the Figma frame could not be read when this was built (the MCP
+    server would not authorise), so the layout follows the account profile's
+    details card and the attendance screen's hand-built app bar rather than the
+    frame itself. **The field list and behaviour are right; the visual
+    treatment still needs checking against the design.**
 - **Attendance** (2026-10-03, Figma frame `470-18042`): the UI lives in
   `lib/GB_Pages/GB_Classes/GB_Attendance/`, the API calls in
   `GB_Services/GB_AttendanceApi.dart`.

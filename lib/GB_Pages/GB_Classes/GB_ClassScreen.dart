@@ -10,6 +10,7 @@ import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassModels.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_ClassWidgets.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_RegisterStudentSheet.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentListSheet.dart';
+import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentProfileScreen.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_Classes/GB_StudentStore.dart';
 import 'package:grow_buddy_app/GB_Pages/GB_HomeScreen/GB_NotificationStore.dart';
 import 'package:grow_buddy_app/GB_Services/GB_ClassApi.dart';
@@ -127,7 +128,7 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
       classInfo: _classInfo,
       onAddStudent: _canRegisterStudents ? _registerStudent : null,
       onStudentTap: (GB_Student student) =>
-          gShowSnack(context, "Student profiles are coming soon"),
+          GB_StudentProfileScreen.open(context, student),
       onStudentLongPress: _canRegisterStudents ? _openStudentMenu : null,
     );
   }
@@ -552,7 +553,7 @@ class _GB_ClassScreenState extends State<GB_ClassScreen> {
                 (GB_Student student) => GB_StudentCard(
                   student: student,
                   onTap: () =>
-                      gShowSnack(context, "Student profiles are coming soon"),
+                      GB_StudentProfileScreen.open(context, student),
                   // A long press rather than a visible button on every card:
                   // editing is occasional, and deleting — reached only from
                   // inside the edit form — is rare and irreversible.
